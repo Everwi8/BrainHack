@@ -5,6 +5,7 @@ import Navbar from "../components/layout/NavBar";
 import CrisisCard from "../components/crisis/CrisisCard";
 import BrainyPanel from "../components/crisis/BrainyPanel";
 import { AlertTriangle, Map } from "lucide-react";
+import BrainyMascot from "../components/BrainyMascot";
 
 export default function Home() {
   const navigate = useNavigate();
@@ -87,12 +88,8 @@ export default function Home() {
             }} />
           </div>
 
-          <img
-            src="/brainy_normal.png"
-            alt="Brainy mascot"
-            style={{ width: 180, height: "auto", objectFit: "contain" }}
-          />
-
+          <BrainyMascot mood="normal" width={180} />
+          
           <button onClick={() => navigate("/map")} style={{
             background: "#B8D4F0",
             border: "none",

@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
+import BrainyMascot from "../components/BrainyMascot";
 import { HeartPulse, User, MessageCircle, ClipboardList, Home, Eye, EyeOff } from "lucide-react";
 
 const roles = [
@@ -35,7 +36,7 @@ return (
                 <div style={{ position: "absolute", bottom: -10, left: "50%", transform: "translateX(-50%)", width: 0, height: 0, borderLeft: "10px solid transparent", borderRight: "10px solid transparent", borderTop: "10px solid #fff" }} />
             </div>
             )}
-            <img src="/brainy_normal.png" alt="Brainy" style={{ width: 160, height: "auto", objectFit: "contain" }} />
+            <BrainyMascot mood="happy" width={160} />
         </div>
         )}
     </div>

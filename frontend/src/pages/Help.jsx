@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import Navbar from "../components/layout/NavBar";
+import BrainyMascot from "../components/BrainyMascot";
 import {
   Bell, MapPin, Camera, Mic, Building2, Home as HomeIcon,
   Users, Flame, Car, Package, Info, Send, AlertCircle,
@@ -180,7 +181,7 @@ export default function Help() {
 
           {/* Brainy bar */}
           <div style={{ display: "flex", alignItems: "center", gap: 16, background: "#FEF3C7", border: "2px solid #F59E0B", borderRadius: 20, padding: "14px 20px", marginBottom: 28 }}>
-            <img src="/brainy_normal.png" alt="Brainy" style={{ width: 56, height: "auto", objectFit: "contain", flexShrink: 0 }} />
+            <BrainyMascot mood="angry" width={56} />
             <div style={{ fontSize: 15, fontWeight: 700, color: "#1a1a2e" }}>
               {submitted ? "Got it! Connecting you now..." : selectedOption.followUp}
             </div>
@@ -295,7 +296,7 @@ export default function Help() {
       <div style={{ width: "100%", maxWidth: 1100, margin: "0 auto", padding: "24px 32px 120px", boxSizing: "border-box" }}>
         {/* Brainy header */}
         <div style={{ display: "flex", alignItems: "center", gap: 20, background: "#FEF3C7", border: "2px solid #F59E0B", borderRadius: 20, padding: "16px 24px", marginBottom: 28 }}>
-          <img src="/brainy_normal.png" alt="Brainy" style={{ width: 72, height: "auto", objectFit: "contain", flexShrink: 0 }} />
+          <BrainyMascot mood="surprised" width={72} style={{ flexShrink: 0 }} />
           <div style={{ flex: 1, fontSize: 17, fontWeight: 700, color: "#1a1a2e", lineHeight: 1.4 }}>
             I'm here, tell me what you need and I'll get help to you.
           </div>
