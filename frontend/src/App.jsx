@@ -5,9 +5,9 @@ import Map from "./pages/Map";
 import Chat from "./pages/Chat";
 import CrisisDetail from "./pages/CrisisDetail";
 
-// Placeholder for Timeline page until it's built
 function Timeline() {
-  const navigate = (() => { try { return require("react-router-dom").useNavigate(); } catch { return () => {}; } })();
+  const { useNavigate } = require("react-router-dom");
+  const navigate = useNavigate();
   return (
     <div style={{ minHeight: "100vh", background: "#F5F0E8", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", fontFamily: "Nunito, sans-serif" }}>
       <h1 style={{ fontSize: 28, fontWeight: 800 }}>Timeline</h1>
