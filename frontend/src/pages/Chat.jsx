@@ -2,7 +2,7 @@
 import Navbar from "../components/layout/NavBar";
 export default function Chat() {
   return (
-    <div>
+    <div style={{ minHeight: "100vh", width: "100%", background: "#F5F0E8", fontFamily: "'Nunito', sans-serif", boxSizing: "border-box" }}>
       <Navbar />
       <div style={{ padding: "20px" }}>
         <h1>Chat with Brainy</h1>

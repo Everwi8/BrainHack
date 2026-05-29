@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import Navbar from "../components/layout/NavBar";
+import BrainyMascot from "../components/BrainyMascot";
 import {
   Bell, MapPin, Camera, Mic, Building2, Home as HomeIcon,
   Users, Flame, Car, Package, Info, Send, AlertCircle,
@@ -180,7 +181,7 @@ export default function Help() {
 
           {/* Brainy bar */}
           <div style={{ display: "flex", alignItems: "center", gap: 16, background: "#FEF3C7", border: "2px solid #F59E0B", borderRadius: 20, padding: "14px 20px", marginBottom: 28 }}>
-            <img src="/brainy_normal.png" alt="Brainy" style={{ width: 56, height: "auto", objectFit: "contain", flexShrink: 0 }} />
+            <BrainyMascot mood="angry" width={56} />
             <div style={{ fontSize: 15, fontWeight: 700, color: "#1a1a2e" }}>
               {submitted ? "Got it! Connecting you now..." : selectedOption.followUp}
             </div>
@@ -290,35 +291,12 @@ export default function Help() {
   return (
     <div style={{ minHeight: "100vh", width: "100%", background: "#F5F0E8", fontFamily: "'Nunito', sans-serif", boxSizing: "border-box" }}>
       {/* Navbar */}
-      <nav style={{ background: "#fff", display: "flex", alignItems: "center", justifyContent: "space-between", padding: "0 40px", height: 64, boxShadow: "0 1px 4px rgba(0,0,0,0.07)", position: "sticky", top: 0, zIndex: 100, width: "100%", boxSizing: "border-box" }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-          <div style={{ width: 36, height: 36, borderRadius: "50%", background: "#F5E6C8", display: "flex", alignItems: "center", justifyContent: "center" }}>
-            <span style={{ fontSize: 18 }}>💗</span>
-          </div>
-          <span style={{ fontWeight: 800, fontSize: 20, color: "#1a1a2e" }}>BrainySG</span>
-        </div>
-        <div style={{ display: "flex", gap: 36 }}>
-          {NAV_LINKS.map(({ label, path }) => (
-            <button key={label} onClick={() => navigate(path)} style={{ background: "none", border: "none", cursor: "pointer", fontFamily: "'Nunito', sans-serif", fontSize: 15, fontWeight: 500, color: "#666", paddingBottom: 4, borderBottom: "2px solid transparent" }}>{label}</button>
-          ))}
-        </div>
-        <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-          <div style={{ position: "relative", cursor: "pointer" }}>
-            <div style={{ width: 38, height: 38, borderRadius: "50%", background: "#FEF3C7", display: "flex", alignItems: "center", justifyContent: "center" }}>
-              <Bell size={18} color="#92400E" />
-            </div>
-            <div style={{ position: "absolute", top: 6, right: 6, width: 8, height: 8, borderRadius: "50%", background: "#EF4444" }} />
-          </div>
-          <div style={{ width: 38, height: 38, borderRadius: "50%", background: "#e0d5c5", display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer" }}>
-            <Users size={20} color="#7a6a56" />
-          </div>
-        </div>
-      </nav>
+      <Navbar />
 
       <div style={{ width: "100%", maxWidth: 1100, margin: "0 auto", padding: "24px 32px 120px", boxSizing: "border-box" }}>
         {/* Brainy header */}
         <div style={{ display: "flex", alignItems: "center", gap: 20, background: "#FEF3C7", border: "2px solid #F59E0B", borderRadius: 20, padding: "16px 24px", marginBottom: 28 }}>
-          <img src="/brainy_normal.png" alt="Brainy" style={{ width: 72, height: "auto", objectFit: "contain", flexShrink: 0 }} />
+          <BrainyMascot mood="surprised" width={72} style={{ flexShrink: 0 }} />
           <div style={{ flex: 1, fontSize: 17, fontWeight: 700, color: "#1a1a2e", lineHeight: 1.4 }}>
             I'm here, tell me what you need and I'll get help to you.
           </div>
