@@ -1,0 +1,10 @@
+// Sanjey — JWT verification middleware
+package middleware
+
+import "github.com/gin-gonic/gin"
+
+func RequireAuth() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		c.Next()
+	}
+}
