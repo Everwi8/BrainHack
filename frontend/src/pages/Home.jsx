@@ -3,7 +3,8 @@ import { useNavigate } from "react-router-dom";
 import {
   Bell, MapPin, Camera, MessageCircle, Mic,
   Waves, BedDouble, Home as HomeIcon, LifeBuoy,
-  AlertTriangle, ChevronRight, Map, Clock
+  AlertTriangle, CheckCircle, Map, Clock,
+  HeartPulse, Flame, Wind, UserCircle
 } from "lucide-react";
 
 const NAV_LINKS = [
@@ -16,12 +17,12 @@ const NAV_LINKS = [
 const crises = [
   {
     id: 1,
-    Icon: () => <span style={{ fontSize: 18 }}>🔥</span>,
+    Icon: () => <Flame size={18} color="#EF4444" />,
     iconBg: "#FEE2E2",
-    title: "Fire Incident",
+    title: "Fire Incident", 
     status: "Active",
     statusColor: "#EF4444",
-    location: "Loyang Industrial Estate, Block 3 Loyang Way",
+    location: "Loyang Industrial Estate, Loyang Way",
     distance: "1.9 km away",
     borderColor: "#EF4444",
     resolved: false,
@@ -40,7 +41,7 @@ const crises = [
   },
   {
     id: 3,
-    Icon: () => <span style={{ fontSize: 18 }}>🌫️</span>,
+    Icon: () => <Wind size={18} color="#10B981" />,
     iconBg: "#D1FAE5",
     title: "Haze Cleared",
     status: "Resolved",
@@ -54,10 +55,10 @@ const crises = [
 
 const quickTopics = [
   { Icon: Waves, label: "Floods", bg: "#DBEAFE", color: "#3B82F6" },
-  { Icon: BedDouble, label: "Hospital Beds", bg: "#DBEAFE", color: "#3B82F6" },
-  { Icon: HomeIcon, label: "Shelters", bg: "#DBEAFE", color: "#3B82F6" },
+  { Icon: BedDouble, label: "Hospital Beds", bg: "#dbfee3", color: "#2ba552" },
+  { Icon: HomeIcon, label: "Shelters", bg: "#fef3db", color: "#efa42c" },
+  { Icon: AlertTriangle, label: "Find Out More", bg: "#FEF3C7", color: "#F59E0B" },
   { Icon: LifeBuoy, label: "Help", bg: "#FEE2E2", color: "#EF4444" },
-  { Icon: AlertTriangle, label: "Find out more", bg: "#FEF3C7", color: "#F59E0B" },
 ];
 
 export default function Home() {
@@ -90,9 +91,9 @@ export default function Home() {
         <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
           <div style={{
             width: 36, height: 36, borderRadius: "50%",
-            background: "#1a1a2e", display: "flex", alignItems: "center", justifyContent: "center",
+            background: "#F5E6C8", display: "flex", alignItems: "center", justifyContent: "center",
           }}>
-            <span style={{ fontSize: 18 }}>❤️</span>
+            <HeartPulse size={20} color="#92400E" />
           </div>
           <span style={{ fontWeight: 800, fontSize: 20, color: "#1a1a2e", letterSpacing: -0.5 }}>BrainySG</span>
         </div>
@@ -129,8 +130,10 @@ export default function Home() {
           <div style={{
             width: 38, height: 38, borderRadius: "50%",
             background: "#e0d5c5", overflow: "hidden",
-            display: "flex", alignItems: "center", justifyContent: "center", fontSize: 20, cursor: "pointer",
-          }}>👤</div>
+            display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer",
+          }}>
+            <UserCircle size={28} color="#7a6a56" />
+          </div>
         </div>
       </nav>
 
@@ -149,8 +152,8 @@ export default function Home() {
         }}>
           <AlertTriangle size={20} color="#F59E0B" />
           <div style={{ flex: 1 }}>
-            <div style={{ fontWeight: 700, fontSize: 14 }}>Heavy Rain Warning</div>
-            <div style={{ fontSize: 12, color: "#666" }}>Expected in North areas next 2 hours.</div>
+            <div style={{ fontWeight: 700, fontSize: 14 , color: "#313131" , textAlign: "left", paddingLeft: 10}}>Heavy Rain Warning</div>
+            <div style={{ fontSize: 12, color: "#666", textAlign: "left" , paddingLeft: 10 }}>Expected in North areas next 2 hours.</div>
           </div>
           <button onClick={() => setAlertVisible(false)} style={{
             background: "none", border: "none", cursor: "pointer", color: "#999", lineHeight: 1,
@@ -171,9 +174,9 @@ export default function Home() {
       }}>
         {/* LEFT: Crisis list */}
         <div>
-          <h2 style={{ fontSize: 17, fontWeight: 800, marginBottom: 16, color: "#1a1a2e" }}>
-            top 3 crises near you:
-          </h2>
+          <div style={{ fontSize: 16, fontWeight: 700, marginBottom: 16, color: "#1a1a2e", textAlign: "left" }}>
+            Top 3 crises near you:
+          </div>
           <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
             {crises.map((c) => (
               <div
@@ -197,11 +200,11 @@ export default function Home() {
                       width: 32, height: 32, borderRadius: "50%",
                       background: c.iconBg, display: "flex", alignItems: "center", justifyContent: "center",
                     }}><c.Icon /></div>
-                    <span style={{ fontWeight: 700, fontSize: 14 }}>{c.title}</span>
+                    <span style={{ fontWeight: 700, fontSize: 14, color: "#313131" }}>{c.title}</span>
                   </div>
                   <span style={{ fontSize: 12, fontWeight: 600, color: c.statusColor, display: "flex", alignItems: "center", gap: 4 }}>
                     {c.resolved
-                      ? <><ChevronRight size={12} /> Resolved</>
+                      ? <><CheckCircle size={12} /> Resolved</>
                       : <><span style={{ width: 7, height: 7, borderRadius: "50%", background: c.statusColor, display: "inline-block" }} /> {c.status}</>
                     }
                   </span>
@@ -248,10 +251,7 @@ export default function Home() {
         </div>
 
         {/* CENTER: Brainy mascot */}
-        <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 16 }}>
-          <div style={{ textAlign: "right", width: "100%", fontSize: 15, fontWeight: 700, color: "#1a1a2e" }}>
-            I am a: <span style={{ fontWeight: 800 }}>resident</span>
-          </div>
+        <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 16, paddingTop: 50 }}>
 
           {/* Speech bubble */}
           <div style={{
@@ -310,14 +310,17 @@ export default function Home() {
         </div>
 
         {/* RIGHT: Actions + Quick Topics */}
-        <div style={{
-          background: "#fff",
-          borderRadius: 20,
-          padding: "20px",
-          boxShadow: "0 1px 8px rgba(0,0,0,0.06)",
-          alignSelf: "start",
-        }}>
-          <div style={{ fontSize: 11, fontWeight: 700, color: "#999", letterSpacing: 1, marginBottom: 14 }}>ACTIONS</div>
+        <div style={{ alignSelf: "start" }}>
+          <div style={{ fontSize: 15, fontWeight: 700, color: "#1a1a2e", textAlign: "right", marginBottom: 10 }}>
+            I am a: <span style={{ fontWeight: 800 }}>resident</span>
+          </div>
+          <div style={{
+            background: "#fff",
+            borderRadius: 20,
+            padding: "20px",
+            boxShadow: "0 1px 8px rgba(0,0,0,0.06)",
+          }}>
+          <div style={{ fontSize: 12, fontWeight: 700, color: "#999", letterSpacing: 1, marginBottom: 14 }}>ACTIONS</div>
           <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
             {[
               { Icon: Camera, label: "Snap a photo", action: () => navigate("/chat") },
@@ -347,7 +350,7 @@ export default function Home() {
             ))}
           </div>
 
-          <div style={{ fontSize: 11, fontWeight: 700, color: "#999", letterSpacing: 1, margin: "20px 0 14px" }}>QUICK TOPICS</div>
+          <div style={{ fontSize: 12, fontWeight: 700, color: "#999", letterSpacing: 1, margin: "20px 0 14px" }}>QUICK TOPICS</div>
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 10 }}>
             {quickTopics.map(({ Icon, label, bg, color }) => (
               <button key={label} style={{
@@ -373,6 +376,7 @@ export default function Home() {
                 {label}
               </button>
             ))}
+          </div>
           </div>
         </div>
       </div>
