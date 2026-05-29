@@ -1,5 +1,7 @@
+// Aiya
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
+import Navbar from "../components/layout/NavBar";
 import {
   Bell, MapPin, Camera, MessageCircle, Mic,
   Waves, BedDouble, Home as HomeIcon, LifeBuoy,
@@ -54,11 +56,11 @@ const crises = [
 ];
 
 const quickTopics = [
-  { Icon: Waves, label: "Floods", bg: "#DBEAFE", color: "#3B82F6" },
-  { Icon: BedDouble, label: "Hospital Beds", bg: "#dbfee3", color: "#2ba552" },
-  { Icon: HomeIcon, label: "Shelters", bg: "#fef3db", color: "#efa42c" },
-  { Icon: AlertTriangle, label: "Find Out More", bg: "#FEF3C7", color: "#F59E0B" },
-  { Icon: LifeBuoy, label: "Help", bg: "#FEE2E2", color: "#EF4444" },
+  { Icon: Waves,         label: "Floods",        bg: "#DBEAFE", color: "#3B82F6", action: "/floods" },
+  { Icon: BedDouble,     label: "Hospital Beds", bg: "#dbfee3", color: "#2ba552", action: "/hospital-beds" },
+  { Icon: HomeIcon,      label: "Shelters",      bg: "#fef3db", color: "#efa42c", action: "/shelters" },
+  { Icon: AlertTriangle, label: "Find Out More", bg: "#FEF3C7", color: "#F59E0B", action: "/info" },
+  { Icon: LifeBuoy,      label: "Get Help",      bg: "#FEE2E2", color: "#EF4444", action: "/help" },
 ];
 
 export default function Home() {
@@ -73,69 +75,9 @@ export default function Home() {
       fontFamily: "'Nunito', sans-serif",
       boxSizing: "border-box",
     }}>
+      
       {/* Navbar */}
-      <nav style={{
-        background: "#fff",
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "space-between",
-        padding: "0 40px",
-        height: 64,
-        boxShadow: "0 1px 4px rgba(0,0,0,0.07)",
-        position: "sticky",
-        top: 0,
-        zIndex: 100,
-        width: "100%",
-        boxSizing: "border-box",
-      }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-          <div style={{
-            width: 36, height: 36, borderRadius: "50%",
-            background: "#F5E6C8", display: "flex", alignItems: "center", justifyContent: "center",
-          }}>
-            <HeartPulse size={20} color="#92400E" />
-          </div>
-          <span style={{ fontWeight: 800, fontSize: 20, color: "#1a1a2e", letterSpacing: -0.5 }}>BrainySG</span>
-        </div>
-
-        <div style={{ display: "flex", gap: 36 }}>
-          {NAV_LINKS.map(({ label, path }) => {
-            const active = label === "Home";
-            return (
-              <button key={label} onClick={() => navigate(path)} style={{
-                background: "none", border: "none", cursor: "pointer",
-                fontFamily: "'Nunito', sans-serif",
-                fontSize: 15, fontWeight: active ? 700 : 500,
-                color: active ? "#1a1a2e" : "#666",
-                paddingBottom: 4,
-                borderBottom: active ? "2px solid #F59E0B" : "2px solid transparent",
-              }}>{label}</button>
-            );
-          })}
-        </div>
-
-        <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-          <div style={{ position: "relative", cursor: "pointer" }}>
-            <div style={{
-              width: 38, height: 38, borderRadius: "50%",
-              background: "#FEF3C7", display: "flex", alignItems: "center", justifyContent: "center",
-            }}>
-              <Bell size={18} color="#92400E" />
-            </div>
-            <div style={{
-              position: "absolute", top: 6, right: 6,
-              width: 8, height: 8, borderRadius: "50%", background: "#EF4444",
-            }} />
-          </div>
-          <div style={{
-            width: 38, height: 38, borderRadius: "50%",
-            background: "#e0d5c5", overflow: "hidden",
-            display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer",
-          }}>
-            <UserCircle size={28} color="#7a6a56" />
-          </div>
-        </div>
-      </nav>
+      <Navbar />
 
       {/* Alert Banner */}
       {alertVisible && (
@@ -352,8 +294,8 @@ export default function Home() {
 
           <div style={{ fontSize: 12, fontWeight: 700, color: "#999", letterSpacing: 1, margin: "20px 0 14px" }}>QUICK TOPICS</div>
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 10 }}>
-            {quickTopics.map(({ Icon, label, bg, color }) => (
-              <button key={label} style={{
+            {quickTopics.map(({ Icon, label, bg, color, action }) => (
+              <button key={label} onClick={() => navigate(action)} style={{
                 background: bg,
                 border: "none",
                 borderRadius: 14,
