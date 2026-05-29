@@ -3,7 +3,7 @@ import { useNavigate, useLocation } from "react-router-dom";
 import { Bell, HeartPulse, UserCircle } from "lucide-react";
 
 const NAV_LINKS = [
-  { label: "Home",  path: "/" },
+  { label: "Home",  path: "/home" },
   { label: "Map",   path: "/map" },
   { label: "Tasks", path: "/crisis" },
   { label: "Chat",  path: "/chat" },

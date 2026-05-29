@@ -196,7 +196,7 @@ export default function Login() {
 
         <img src="/brainy_normal.png" alt="Brainy" style={{ width: 200, height: "auto", objectFit: "contain" }} />
 
-        <button onClick={() => navigate("/")} style={{ background: "#B8D4F0", border: "none", borderRadius: 30, padding: "14px 40px", fontFamily: "'Nunito', sans-serif", fontWeight: 800, fontSize: 16, cursor: "pointer", color: "#1a1a2e", display: "flex", alignItems: "center", gap: 10, transition: "background 0.15s" }}
+        <button onClick={() => navigate("/home")} style={{ background: "#B8D4F0", border: "none", borderRadius: 30, padding: "14px 40px", fontFamily: "'Nunito', sans-serif", fontWeight: 800, fontSize: 16, cursor: "pointer", color: "#1a1a2e", display: "flex", alignItems: "center", gap: 10, transition: "background 0.15s" }}
           onMouseEnter={e => e.currentTarget.style.background = "#93C5FD"}
           onMouseLeave={e => e.currentTarget.style.background = "#B8D4F0"}
         >
