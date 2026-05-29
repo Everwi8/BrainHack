@@ -4,7 +4,6 @@ import Help from "./pages/Help";
 import Map from "./pages/Map";
 import Chat from "./pages/Chat";
 import CrisisDetail from "./pages/CrisisDetail";
-import Volunteer from "./pages/Volunteer";
 
 // Placeholder for Timeline page until it's built
 function Timeline() {
@@ -27,7 +26,6 @@ export default function App() {
         <Route path="/map" element={<Map />} />
         <Route path="/chat" element={<Chat />} />
         <Route path="/crisis" element={<CrisisDetail />} />
-        <Route path="/volunteer" element={<Volunteer />} />
         <Route path="/timeline" element={<Timeline />} />
       </Routes>
     </BrowserRouter>
