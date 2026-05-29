@@ -1,2 +1,236 @@
-// Sanjey — NEA data ingestion (weather, haze, dengue)
+// NEA ingestion — polls data.gov.sg every 5 minutes for PSI (haze) and
+// 2-hour weather forecasts, then upserts crisis records when thresholds are met.
 package ingestion
+
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+	"io"
+	"log"
+	"net/http"
+	"time"
+
+	"backend/cache"
+	"backend/lib"
+)
+
+const (
+	psiURL      = "https://api-open.data.gov.sg/v2/real-time/api/psi"
+	weatherURL  = "https://api-open.data.gov.sg/v2/real-time/api/two-hr-forecast"
+	neaInterval = 5 * time.Minute
+)
+
+// RunNEA starts the background ingestion loop. Call as a goroutine from main.
+func RunNEA(ctx context.Context) {
+	log.Println("[nea] ingestion started")
+	if err := fetchNEA(); err != nil {
+		log.Printf("[nea] initial fetch error: %v", err)
+	}
+	ticker := time.NewTicker(neaInterval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ticker.C:
+			if err := fetchNEA(); err != nil {
+				log.Printf("[nea] fetch error: %v", err)
+			}
+		case <-ctx.Done():
+			log.Println("[nea] ingestion stopped")
+			return
+		}
+	}
+}
+
+func fetchNEA() error {
+	if err := fetchPSI(); err != nil {
+		log.Printf("[nea] psi error: %v", err)
+	}
+	if err := fetchWeather(); err != nil {
+		log.Printf("[nea] weather error: %v", err)
+	}
+	// Bust the crises list cache so the next API call returns fresh data.
+	cache.GlobalCache.Invalidate("crises:all")
+	return nil
+}
+
+// ─── PSI ─────────────────────────────────────────────────────────────────────
+
+type psiResponse struct {
+	Code int `json:"code"`
+	Data struct {
+		Items []struct {
+			Readings struct {
+				PsiTwentyFourHourly struct {
+					National float64 `json:"national"`
+					North    float64 `json:"north"`
+					South    float64 `json:"south"`
+					East     float64 `json:"east"`
+					West     float64 `json:"west"`
+					Central  float64 `json:"central"`
+				} `json:"psi_twenty_four_hourly"`
+			} `json:"readings"`
+		} `json:"items"`
+		RegionMetadata []struct {
+			Name          string `json:"name"`
+			LabelLocation struct {
+				Lat float64 `json:"latitude"`
+				Lng float64 `json:"longitude"`
+			} `json:"label_location"`
+		} `json:"region_metadata"`
+	} `json:"data"`
+}
+
+func fetchPSI() error {
+	body, err := getJSON(psiURL)
+	if err != nil {
+		return err
+	}
+	var resp psiResponse
+	if err := json.Unmarshal(body, &resp); err != nil {
+		return err
+	}
+	if len(resp.Data.Items) == 0 {
+		return nil
+	}
+
+	readings := resp.Data.Items[0].Readings.PsiTwentyFourHourly
+	national := readings.National
+
+	// PSI >= 100 = Unhealthy → create/update a haze crisis
+	if national < 100 {
+		return nil
+	}
+
+	severity := psiSeverity(national)
+	crisis := lib.Crisis{
+		ExternalID:   "nea:psi:national",
+		Title:        fmt.Sprintf("Haze Alert — PSI %.0f (National)", national),
+		Description:  fmt.Sprintf("24-hour national PSI is %.0f. %s", national, psiAdvice(national)),
+		Type:         "haze",
+		Severity:     severity,
+		Status:       "active",
+		Lat:          1.3521,
+		Lng:          103.8198,
+		LocationName: "Singapore (National)",
+		Source:       "nea",
+	}
+	return lib.DB.UpsertCrisis(crisis)
+}
+
+func psiSeverity(psi float64) string {
+	switch {
+	case psi >= 301:
+		return "critical"
+	case psi >= 201:
+		return "high"
+	case psi >= 101:
+		return "medium"
+	default:
+		return "low"
+	}
+}
+
+func psiAdvice(psi float64) string {
+	switch {
+	case psi >= 301:
+		return "Hazardous. Everyone should avoid outdoor activities."
+	case psi >= 201:
+		return "Very unhealthy. Avoid prolonged outdoor exertion."
+	default:
+		return "Unhealthy for sensitive groups. Wear N95 outdoors."
+	}
+}
+
+// ─── 2-hour weather ───────────────────────────────────────────────────────────
+
+type weatherResponse struct {
+	Code int `json:"code"`
+	Data struct {
+		Items []struct {
+			Forecasts []struct {
+				Area     string `json:"area"`
+				Forecast string `json:"forecast"`
+			} `json:"forecasts"`
+		} `json:"items"`
+		AreaMetadata []struct {
+			Name          string `json:"name"`
+			LabelLocation struct {
+				Lat float64 `json:"latitude"`
+				Lng float64 `json:"longitude"`
+			} `json:"label_location"`
+		} `json:"area_metadata"`
+	} `json:"data"`
+}
+
+var severeKeywords = []string{
+	"Thundery Showers", "Heavy Thundery Showers", "Heavy Rain",
+	"Heavy Showers", "Passing Showers",
+}
+
+func fetchWeather() error {
+	body, err := getJSON(weatherURL)
+	if err != nil {
+		return err
+	}
+	var resp weatherResponse
+	if err := json.Unmarshal(body, &resp); err != nil {
+		return err
+	}
+	if len(resp.Data.Items) == 0 {
+		return nil
+	}
+
+	// Build a location map for lat/lng lookups.
+	coords := make(map[string][2]float64, len(resp.Data.AreaMetadata))
+	for _, m := range resp.Data.AreaMetadata {
+		coords[m.Name] = [2]float64{m.LabelLocation.Lat, m.LabelLocation.Lng}
+	}
+
+	for _, f := range resp.Data.Items[0].Forecasts {
+		if !isSevereWeather(f.Forecast) {
+			continue
+		}
+		loc, ok := coords[f.Area]
+		if !ok {
+			continue
+		}
+		crisis := lib.Crisis{
+			ExternalID:   "nea:weather:" + f.Area,
+			Title:        fmt.Sprintf("Severe Weather — %s (%s)", f.Area, f.Forecast),
+			Description:  fmt.Sprintf("2-hour forecast for %s: %s.", f.Area, f.Forecast),
+			Type:         "flood",
+			Severity:     "medium",
+			Status:       "active",
+			Lat:          loc[0],
+			Lng:          loc[1],
+			LocationName: f.Area,
+			Source:       "nea",
+		}
+		if err := lib.DB.UpsertCrisis(crisis); err != nil {
+			log.Printf("[nea] upsert weather crisis for %s: %v", f.Area, err)
+		}
+	}
+	return nil
+}
+
+func isSevereWeather(forecast string) bool {
+	for _, kw := range severeKeywords {
+		if forecast == kw {
+			return true
+		}
+	}
+	return false
+}
+
+// ─── shared HTTP helper ───────────────────────────────────────────────────────
+
+func getJSON(url string) ([]byte, error) {
+	client := &http.Client{Timeout: 10 * time.Second}
+	resp, err := client.Get(url)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	return io.ReadAll(resp.Body)
+}
