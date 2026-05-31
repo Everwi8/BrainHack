@@ -8,7 +8,9 @@
 ## Decisions (locked)
 
 - **LLM provider:** Keep OpenRouter / Nemotron (`nvidia/nemotron-3-super-120b-a12b:free`) — already wired in `backend/lib/llm.go`, lowest friction, matches current `.env`. (Plan doc mentions gpt-oss-120b, but we build against what works.)
-- **Vision model:** For the photo endpoint, pick a vision-capable OpenRouter model separately (Nemotron text model can't see images). To confirm at build time.
+- **Vision model:** ✅ Confirmed `nvidia/nemotron-nano-12b-v2-vl:free` — free, vision-capable, same NVIDIA family/endpoint as the text model (zero extra config), built for document/OCR + multi-image understanding. Configurable via `LLM_VISION_MODEL` env var (defaults to this).
+- **Two models, not one:** Text stays on the 120B; photos go to the 12B VL. Rationale: the 120B gives better reasoning + SG-local knowledge for chat, and per-model free-tier limits (~20 rpm / 200 day) mean **separate models = separate quota buckets** = double headroom for the demo. Collapsing to the single VL model is a one-line env change (`LLM_MODEL=...-vl:free`) if we ever want it, at the cost of weaker text answers and a shared rate bucket.
+- **Photo → answer pipeline (current):** Direct — the VL model both sees the image and writes the user-facing reply (1 call, best visual grounding, but 12B-level prose and no chat history on the image call). **Open decision for Phase 3/4:** switch to a *hybrid* where the VL model emits a structured observation (via the `ChatJSON` helper) that feeds the 120B for the final answer — better advice quality + reuses straight into triage/task-cards, at the cost of 2 calls/latency. Build when wiring Phase 3.
 
 ---
 
@@ -18,6 +20,8 @@
 - `backend/lib/llm.go` — OpenAI-compatible client, Brainy system prompt, in-memory session history (system prompt + last 20 turns), basic error handling.
 - `backend/handler/chat.go` + `POST /api/chat` (registered in `main.go`) — functional.
 - Frontend: `Chat.jsx`, `ChatInput.jsx`, `BrainyMascot.jsx`, `BrainyPanel.jsx`, shelter rich cards, quick-action chips, intro message.
+- **Phase 1 (chat robustness):** retry w/ exponential backoff on 429/5xx/network (shared `postCompletion` transport), `ChatJSON` structured-output helper (+ `stripJSONFences`).
+- **Phase 2 (photo interpretation):** `VisionLLM` (base64 data-URL → VL model), `POST /api/chat/photo` handler (multipart, 8 MB cap, content-sniff validation), session-history trace so text follow-ups keep photo context. Frontend: camera→preview→send→render wired in `ChatInput.jsx`/`Chat.jsx`; `api.postForm` added. `test-chat.html` updated to exercise the photo path. **Verified end-to-end** against live OpenRouter (flood photo → correct severity/advice; follow-up text recalled the photo).
 
 ### Key constraint ⚠️
 Sanjey's data layer is **empty stubs**:
@@ -29,19 +33,19 @@ Sanjey's data layer is **empty stubs**:
 
 ---
 
-## Phase 1 — Chat Robustness (quick win, unblocks later phases)
+## Phase 1 — Chat Robustness (quick win, unblocks later phases) ✅
 
-- [ ] Add **retry logic** to `llm.go` (3 attempts, exponential backoff) for transient HTTP/5xx failures.
-- [ ] Add a **structured JSON output helper** in `llm.go` — sends a request expecting JSON and parses into a target struct. Reused by triage + task generation.
-- [ ] Confirm OpenRouter free-tier rate limits are tolerable for demo.
+- [x] Add **retry logic** to `llm.go` (3 attempts, exponential backoff) for transient HTTP/5xx failures. → shared `postCompletion`, retries 429/5xx/network at 500ms→1s→2s.
+- [x] Add a **structured JSON output helper** in `llm.go` — sends a request expecting JSON and parses into a target struct. Reused by triage + task generation. → `ChatJSON` + `stripJSONFences`.
+- [x] Confirm OpenRouter free-tier rate limits are tolerable for demo. → ~20 rpm / 200 day per model; retry logic absorbs occasional 429s. OK for demo.
 
-## Phase 2 — Photo Interpretation
+## Phase 2 — Photo Interpretation ✅
 
-- [ ] `POST /api/chat/photo` handler — accept multipart image upload (+ optional `session_id`, caption).
-- [ ] Send image to a vision-capable OpenRouter model via `llm.go` (base64 data URL in `image_url` content part).
-- [ ] Return situation description + recommended actions; append to session history so follow-up text chat has context.
-- [ ] Frontend (`ChatInput.jsx` / `Chat.jsx`): camera/file-picker button → preview before send → upload with loading indicator → render AI response.
-- [ ] Test fixtures: sample flood/fire/haze photos.
+- [x] `POST /api/chat/photo` handler — accept multipart image upload (+ optional `session_id`, caption). → `handler/photo.go`, 8 MB cap, sniffs real content-type.
+- [x] Send image to a vision-capable OpenRouter model via `llm.go` (base64 data URL in `image_url` content part). → `VisionLLM`, model `nvidia/nemotron-nano-12b-v2-vl:free`.
+- [x] Return situation description + recommended actions; append to session history so follow-up text chat has context. → text-only trace appended; verified follow-up recall.
+- [x] Frontend (`ChatInput.jsx` / `Chat.jsx`): camera/file-picker button → preview before send → upload with loading indicator → render AI response. → `api.postForm` added.
+- [ ] Test fixtures: sample flood/fire/haze photos. → still TODO (tested with a synthetic flood image, not committed).
 
 ## Phase 3 — Triage Logic (against mock data)
 
@@ -66,8 +70,8 @@ Sanjey's data layer is **empty stubs**:
 ## Phase 5 — Polish
 
 - [ ] Keep chat history in-memory for MVP (revisit DB only if needed).
-- [ ] Update `test-chat.html` to exercise photo + triage paths.
-- [ ] Document the new endpoints in the API contract section of `plan.md`.
+- [~] Update `test-chat.html` to exercise photo + triage paths. → photo path done; triage path pending Phase 3.
+- [x] Document the new endpoints in the API contract section of `plan.md`. → `/api/chat/photo` already in the contract table.
 
 ---
 

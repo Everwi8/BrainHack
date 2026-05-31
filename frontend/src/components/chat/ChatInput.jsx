@@ -1,14 +1,23 @@
 import { Camera, Mic, SendHorizontal } from "lucide-react";
-import { useState } from "react";
+import { useRef, useState } from "react";
 
-export default function ChatInput({ value, onChange, onSend, onCamera, onMic, disabled = false }) {
+export default function ChatInput({ value, onChange, onSend, onPickImage, onMic, disabled = false }) {
   const [focused, setFocused] = useState(false);
+  const fileInputRef = useRef(null);
 
   const handleKeyDown = (e) => {
     if (e.key === "Enter" && !e.shiftKey && !disabled) {
       e.preventDefault();
       onSend?.();
     }
+  };
+
+  const handleCameraClick = () => fileInputRef.current?.click();
+
+  const handleFileChange = (e) => {
+    const file = e.target.files?.[0];
+    if (file) onPickImage?.(file);
+    e.target.value = ""; // allow re-selecting the same file
   };
 
   const iconBtn = (onClick, Icon) => (
@@ -37,7 +46,15 @@ export default function ChatInput({ value, onChange, onSend, onCamera, onMic, di
       opacity: disabled ? 0.6 : 1,
       transition: "box-shadow 0.2s, opacity 0.2s",
     }}>
-      {iconBtn(onCamera, Camera)}
+      <input
+        ref={fileInputRef}
+        type="file"
+        accept="image/*"
+        capture="environment"
+        onChange={handleFileChange}
+        style={{ display: "none" }}
+      />
+      {iconBtn(handleCameraClick, Camera)}
       {iconBtn(onMic, Mic)}
       <input
         value={value}

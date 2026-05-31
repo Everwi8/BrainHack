@@ -221,11 +221,11 @@ The platform does four things:
   - [x] Text field with send button
   - [x] Camera icon button for photo capture
   - [x] Microphone icon (triggers James's voice flow, or links to it)
-- [ ] **Photo Capture Flow**
-  - [ ] Camera button → device camera / file picker
-  - [ ] Photo preview before sending
-  - [ ] Upload with loading indicator
-  - [ ] AI response with situation analysis
+- [x] **Photo Capture Flow**
+  - [x] Camera button → device camera / file picker
+  - [x] Photo preview before sending
+  - [x] Upload with loading indicator
+  - [x] AI response with situation analysis
 - [x] **Inline Rich Cards in Chat**
   - [x] Shelter card (name, distance, "View Map" link) — like the Pasir Ris Community Club card
   - [ ] Hospital card (name, bed availability)
@@ -243,8 +243,8 @@ The platform does four things:
   - [x] Conversation context management (in-memory history per session, capped at 20 turns)
   - [x] `POST /api/chat` handler wired up (`backend/handler/chat.go`)
   - [x] Error handling for API failures
-  - [ ] Structured JSON output parsing for task cards
-  - [ ] Retry logic for transient API failures
+  - [x] Structured JSON output parsing for task cards (`ChatJSON` helper in `llm.go`)
+  - [x] Retry logic for transient API failures (3 attempts, exponential backoff on 429/5xx/network)
 - [ ] **Triage Logic**
   - [ ] Threshold rules: water level > X% → flood warning
   - [ ] Threshold rules: PSI > 100 → haze advisory
@@ -257,13 +257,13 @@ The platform does four things:
   - [ ] AI generates structured task card JSON from triage output
   - [ ] POST generated tasks to Sanjey's `/api/tasks` endpoint
   - [ ] Task fields: title, description, priority, volunteers_needed, crisis_id
-- [ ] **Photo Interpretation**
-  - [ ] Accept image upload via `POST /api/chat/photo`
-  - [ ] Send image to Gemini Flash vision
-  - [ ] Return situation description + recommended actions
+- [x] **Photo Interpretation**
+  - [x] Accept image upload via `POST /api/chat/photo` (multipart, 8 MB cap, content-type sniffed)
+  - [x] Send image to vision model — `nvidia/nemotron-nano-12b-v2-vl:free` (OpenRouter), not Gemini Flash; base64 data URL via `VisionLLM`
+  - [x] Return situation description + recommended actions; photo trace added to session history so text follow-ups keep context
 - [x] **Chat Endpoints**
   - [x] `POST /api/chat` — send text message, return AI response (fully implemented)
-  - [ ] `POST /api/chat/photo` — send image, return AI analysis
+  - [x] `POST /api/chat/photo` — send image, return AI analysis
 - [ ] Chat history storage (in-memory for MVP, or DB)
 
 ### Mock Data Needed
@@ -413,6 +413,6 @@ The platform does four things:
 
 - Hospital bed data is **annual/static**, not live. Display as "last reported" or simulate for demo.
 - All frontend work can proceed with mock data before Sanjey's endpoints are ready.
-- Perrin's AI work is independently testable against Gemini Flash API.
+- Perrin's AI work is independently testable against the OpenRouter/Nemotron API (text: `nvidia/nemotron-3-super-120b-a12b:free`; vision: `nvidia/nemotron-nano-12b-v2-vl:free`). Gemini Flash is no longer used. See `plan-perrin.md` for the per-endpoint model breakdown and rationale.
 - Update the pitch deck: Flask → Go + Gin, Gemini Flash → gpt-oss-120b (or say "LLM API").
 - LLM base URL is configurable via `LLM_BASE_URL` env var (default: `https://api.zai.com/v1`). Confirm with API provider if endpoint differs.
