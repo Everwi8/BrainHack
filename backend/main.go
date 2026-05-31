@@ -19,6 +19,7 @@ func main() {
 	r.Use(middleware.CORS())
 
 	r.GET("/health", handler.Health)
+	r.StaticFile("/test-chat", "../test-chat.html")
 
 	api := r.Group("/api")
 	{

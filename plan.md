@@ -1,7 +1,7 @@
 # BrainySG — MVP Project Plan
 
 **Team:** came4food · DSTA BrainHack 2026 · Fast Response Track
-**Stack:** React + Vite + TailwindCSS (frontend) · Go + Gin (backend) · PostgreSQL · Gemini Flash API
+**Stack:** React + Vite + TailwindCSS (frontend) · Go + Gin (backend) · PostgreSQL · gpt-oss-120b (OpenAI-compatible LLM API)
 
 ---
 
@@ -35,7 +35,7 @@ The platform does four things:
 - **Frontend:** React 18+ with Vite, TailwindCSS, React Router, PWA (service worker + manifest)
 - **Backend:** Go with Gin framework, organized under `backend/` with `handlers/`, `middleware/`, `models/`, `services/` folders
 - **Database:** PostgreSQL (using pgx or GORM)
-- **AI:** Gemini Flash API (free tier) for chatbot, triage reasoning, photo interpretation, and task generation
+- **AI:** gpt-oss-120b via OpenAI-compatible API (`backend/lib/llm.go`) for chatbot, triage reasoning, photo interpretation, and task generation
 - **Maps:** OneMap API (Singapore's national basemap, built on Leaflet)
 - **Real-time:** gorilla/websocket for volunteer group chat
 - **Speech-to-text:** Google STT or Whisper API for voice transcription
@@ -237,12 +237,14 @@ The platform does four things:
 
 ### Backend
 
-- [ ] **Gemini Flash API Integration**
-  - [ ] API client wrapper under `backend/services/`
-  - [ ] System prompt design for crisis chatbot persona (Brainy)
-  - [ ] Conversation context management (maintain history per session)
+- [x] **LLM API Integration (gpt-oss-120b)**
+  - [x] API client wrapper at `backend/lib/llm.go` (OpenAI-compatible, model: `gpt-oss-120b`)
+  - [x] System prompt design for crisis chatbot persona (Brainy)
+  - [x] Conversation context management (in-memory history per session, capped at 20 turns)
+  - [x] `POST /api/chat` handler wired up (`backend/handler/chat.go`)
+  - [x] Error handling for API failures
   - [ ] Structured JSON output parsing for task cards
-  - [ ] Error handling and retry logic for API failures
+  - [ ] Retry logic for transient API failures
 - [ ] **Triage Logic**
   - [ ] Threshold rules: water level > X% → flood warning
   - [ ] Threshold rules: PSI > 100 → haze advisory
@@ -260,7 +262,7 @@ The platform does four things:
   - [ ] Send image to Gemini Flash vision
   - [ ] Return situation description + recommended actions
 - [x] **Chat Endpoints**
-  - [x] `POST /api/chat` — send text message, return AI response (route registered, handler stub)
+  - [x] `POST /api/chat` — send text message, return AI response (fully implemented)
   - [ ] `POST /api/chat/photo` — send image, return AI analysis
 - [ ] Chat history storage (in-memory for MVP, or DB)
 
@@ -403,7 +405,7 @@ The platform does four things:
 | MOH | data.gov.sg | Hospital bed counts, BOR | Annual | Yes |
 | OneMap | onemap.gov.sg | Basemap, geocoding, routing | Live | Yes |
 | Notify SG | GovTech | Push notifications to citizens | Live | Yes |
-| Gemini Flash | Google AI | LLM for chatbot + vision | Per request | Free tier |
+| gpt-oss-120b | ZAI API (`csk-` key) | LLM for chatbot + triage | Per request | Provisioned |
 
 ---
 
@@ -412,4 +414,5 @@ The platform does four things:
 - Hospital bed data is **annual/static**, not live. Display as "last reported" or simulate for demo.
 - All frontend work can proceed with mock data before Sanjey's endpoints are ready.
 - Perrin's AI work is independently testable against Gemini Flash API.
-- Update the pitch deck: Flask → Go + Gin, Claude → Gemini Flash (or say "LLM API").
+- Update the pitch deck: Flask → Go + Gin, Gemini Flash → gpt-oss-120b (or say "LLM API").
+- LLM base URL is configurable via `LLM_BASE_URL` env var (default: `https://api.zai.com/v1`). Confirm with API provider if endpoint differs.
