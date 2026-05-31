@@ -38,6 +38,7 @@ func main() {
 
 		// Jerald
 		api.GET("/map/markers", handler.MapMarkers)
+		api.GET("/shelters", handler.GetShelters)
 
 		// James
 		api.GET("/volunteers", handler.ListVolunteers)
