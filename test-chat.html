@@ -25,11 +25,23 @@
     #preview img { width: 48px; height: 48px; object-fit: cover; border-radius: 8px; }
     #preview .name { flex: 1; font-size: 12px; color: #475569; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     #preview .clear { background: #e2e8f0; color: #334155; padding: 6px 10px; font-size: 12px; }
+    #toolbar { display: flex; gap: 8px; padding: 8px 14px; border-bottom: 1px solid #eee; background: #f8fafc; }
+    #toolbar button { background: #0f766e; padding: 7px 12px; font-size: 12px; }
+    #toolbar button:disabled { background: #99c7c1; }
+    .card { align-self: flex-start; max-width: 90%; background: #ecfeff; border: 1px solid #a5f3fc; border-radius: 12px; padding: 10px 12px; font-size: 13px; line-height: 1.45; }
+    .card .t { font-weight: 600; color: #0e7490; }
+    .card .sev { font-size: 11px; text-transform: uppercase; font-weight: 700; }
+    .sev.critical { color: #b91c1c; } .sev.high { color: #b91c1c; }
+    .sev.warning, .sev.medium { color: #b45309; } .sev.low { color: #15803d; }
   </style>
 </head>
 <body>
 <div id="app">
   <h2>Brainy — Chat Test <span style="font-weight:normal;color:#6b7280;">(localhost:8080)</span></h2>
+  <div id="toolbar">
+    <button type="button" id="triageBtn" title="Run cross-agency triage">🔎 Triage</button>
+    <button type="button" id="tasksBtn" title="Generate volunteer task cards">📋 Generate Tasks</button>
+  </div>
   <div id="messages"></div>
   <div id="session">session: —</div>
   <div id="preview">
@@ -48,6 +60,8 @@
 <script>
   const CHAT_API = '/api/chat';
   const PHOTO_API = '/api/chat/photo';
+  const TRIAGE_API = '/api/triage';
+  const TASKS_API = '/api/triage/tasks';
   let sessionId = '';
   let pendingFile = null;
 
@@ -165,6 +179,72 @@
       input.focus();
     }
   }
+
+  // ── Triage + task-card generation ─────────────────────────────────────────
+  const triageBtn = document.getElementById('triageBtn');
+  const tasksBtn = document.getElementById('tasksBtn');
+
+  function addCard(html) {
+    const div = document.createElement('div');
+    div.className = 'card';
+    div.innerHTML = html;
+    messages.appendChild(div);
+    messages.scrollTop = messages.scrollHeight;
+  }
+
+  function esc(s) {
+    const d = document.createElement('div');
+    d.textContent = s == null ? '' : s;
+    return d.innerHTML;
+  }
+
+  triageBtn.addEventListener('click', async () => {
+    triageBtn.disabled = true;
+    addMsg('Running cross-agency triage…', 'bot');
+    const pending = messages.lastChild;
+    try {
+      const res = await fetch(TRIAGE_API);
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || res.statusText);
+      pending.textContent = `Triage: ${data.findings.length} finding(s)`;
+      for (const f of data.findings) {
+        addCard(`<span class="sev ${esc(f.severity)}">${esc(f.severity)}</span>`
+          + ` <span class="t">${esc(f.title)}</span>`
+          + (f.cascade ? ' 🔗' : '')
+          + `<br>${esc(f.detail)}`
+          + `<br><small>sources: ${esc((f.sources||[]).join(', '))}</small>`);
+      }
+    } catch (err) {
+      pending.className = 'msg error';
+      pending.textContent = 'Error: ' + err.message;
+    } finally {
+      triageBtn.disabled = false;
+    }
+  });
+
+  tasksBtn.addEventListener('click', async () => {
+    tasksBtn.disabled = true;
+    addMsg('Generating volunteer task cards…', 'bot');
+    const pending = messages.lastChild;
+    try {
+      const res = await fetch(TASKS_API);
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || res.statusText);
+      pending.textContent = `Generated ${data.tasks.length} task card(s)`;
+      for (const t of data.tasks) {
+        addCard(`<span class="sev ${esc(t.priority)}">${esc(t.priority)}</span>`
+          + ` <span class="t">${esc(t.title)}</span>`
+          + ` <small>· ${esc(t.volunteers_needed)} volunteer(s)</small>`
+          + `<br>${esc(t.description)}`
+          + (t.location ? `<br><small>📍 ${esc(t.location)}</small>` : ''));
+      }
+    } catch (err) {
+      pending.className = 'msg error';
+      pending.textContent = 'Error: ' + err.message;
+    } finally {
+      tasksBtn.disabled = false;
+    }
+  });
 </script>
 </body>
 </html>
