@@ -36,6 +36,7 @@ func main() {
 
 		// Perrin
 		api.POST("/chat", handler.Chat)
+		api.POST("/chat/photo", handler.ChatPhoto)
 
 		// Jerald
 		api.GET("/map/markers", handler.MapMarkers)

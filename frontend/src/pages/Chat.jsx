@@ -1,10 +1,11 @@
 import { useState, useRef, useEffect } from "react";
-import { Waves, House, Zap, AlertTriangle, Bot } from "lucide-react";
+import { Waves, House, Zap, AlertTriangle, Bot, X } from "lucide-react";
 import Navbar from "../components/layout/NavBar";
 import BrainyMascot from "../components/BrainyMascot";
 import MessageBubble from "../components/chat/MessageBubble";
 import ChatInput from "../components/chat/ChatInput";
 import InlineShelterCard from "../components/chat/InlineShelterCard";
+import { api } from "../lib/api";
 
 // ── Mock responses (swap out for real API call when backend is ready) ──────────
 const MOCK_RESPONSES = {
@@ -120,11 +121,60 @@ export default function Chat() {
   const [messages, setMessages] = useState(INITIAL_MESSAGES);
   const [input, setInput] = useState("");
   const [isTyping, setIsTyping] = useState(false);
+  const [sessionId, setSessionId] = useState(null);
+  const [pendingImage, setPendingImage] = useState(null);   // { file, url }
   const messagesEndRef = useRef(null);
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages, isTyping]);
+
+  const handlePickImage = (file) => {
+    // Replacing an un-sent preview: free the old object URL first.
+    if (pendingImage?.url) URL.revokeObjectURL(pendingImage.url);
+    setPendingImage({ file, url: URL.createObjectURL(file) });
+  };
+
+  const cancelPhoto = () => {
+    if (pendingImage?.url) URL.revokeObjectURL(pendingImage.url);
+    setPendingImage(null);
+  };
+
+  const sendPhoto = async () => {
+    if (!pendingImage || isTyping) return;
+
+    const caption = input.trim();
+    const { file, url } = pendingImage;
+
+    // Show the user's photo (and caption) immediately.
+    setMessages(prev => [...prev, {
+      id: Date.now(), role: "user", text: caption, imageUrl: url, timestamp: nowTime(),
+    }]);
+    setInput("");
+    setPendingImage(null);   // keep the object URL alive — it's now owned by the message
+    setIsTyping(true);
+
+    const form = new FormData();
+    form.append("image", file);
+    if (caption) form.append("caption", caption);
+    if (sessionId) form.append("session_id", sessionId);
+
+    try {
+      const res = await api.postForm("/api/chat/photo", form);
+      if (res.session_id) setSessionId(res.session_id);
+      setMessages(prev => [...prev, {
+        id: Date.now(), role: "bot", text: res.reply, timestamp: nowTime(),
+      }]);
+    } catch (err) {
+      setMessages(prev => [...prev, {
+        id: Date.now(), role: "bot",
+        text: `Sorry, I couldn't analyse that photo. ${err.message}`,
+        timestamp: nowTime(),
+      }]);
+    } finally {
+      setIsTyping(false);
+    }
+  };
 
   const sendMessage = (text) => {
     const trimmed = (text ?? input).trim();
@@ -193,6 +243,16 @@ export default function Chat() {
                 text={msg.text}
                 timestamp={msg.timestamp}
               >
+                {msg.imageUrl && (
+                  <img
+                    src={msg.imageUrl}
+                    alt="Shared photo"
+                    style={{
+                      maxWidth: "100%", borderRadius: 12, marginTop: msg.text ? 8 : 0,
+                      display: "block",
+                    }}
+                  />
+                )}
                 {msg.shelterCard && (
                   <InlineShelterCard
                     name={msg.shelterCard.name}
@@ -231,11 +291,43 @@ export default function Chat() {
             ))}
           </div>
 
+          {/* Pending photo preview */}
+          {pendingImage && (
+            <div style={{
+              display: "flex", alignItems: "center", gap: 12,
+              background: "#fff", borderRadius: 16, padding: 10, marginBottom: 10,
+              boxShadow: "0 2px 8px rgba(0,0,0,0.08)",
+            }}>
+              <img
+                src={pendingImage.url}
+                alt="Preview"
+                style={{ width: 56, height: 56, objectFit: "cover", borderRadius: 10, flexShrink: 0 }}
+              />
+              <div style={{ flex: 1, fontSize: 13, color: "#6B7280", fontWeight: 600 }}>
+                Photo ready to send. Add an optional note, then tap send.
+              </div>
+              <button
+                onClick={cancelPhoto}
+                disabled={isTyping}
+                title="Remove photo"
+                style={{
+                  background: "none", border: "none", cursor: isTyping ? "not-allowed" : "pointer",
+                  padding: 6, borderRadius: 8, display: "flex", flexShrink: 0,
+                }}
+                onMouseEnter={e => e.currentTarget.style.background = "#F3F4F6"}
+                onMouseLeave={e => e.currentTarget.style.background = "none"}
+              >
+                <X size={18} color="#6B7280" />
+              </button>
+            </div>
+          )}
+
           {/* Input bar */}
           <ChatInput
             value={input}
             onChange={e => setInput(e.target.value)}
-            onSend={() => sendMessage()}
+            onSend={() => (pendingImage ? sendPhoto() : sendMessage())}
+            onPickImage={handlePickImage}
             disabled={isTyping}
           />
         </div>
