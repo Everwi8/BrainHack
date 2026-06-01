@@ -99,6 +99,7 @@ The platform does four things:
 | `/api/data/haze` | GET | Sanjey | Perrin |
 | `/api/data/dengue` | GET | Sanjey | Perrin |
 | `/api/data/transport` | GET | Sanjey | Perrin |
+| `/api/feed` | GET | Sanjey | Aiya |
 
 ---
 
@@ -133,6 +134,13 @@ The platform does four things:
 - [ ] Loading states and error boundaries
 - [ ] Responsive layout (desktop + mobile)
 - [x] User avatar / profile icon in nav
+- [x] **Feed / Timeline Page** (`/timeline` → `pages/Timeline.jsx`)
+  - [x] Three-column layout (left panel, center feed, right sidebar)
+  - [x] Left panel: "See what's happening in Singapore!" card + Report Crisis button + Brainy mascot
+  - [x] Center feed: crisis event cards with tag badges (URGENT ALERT / LIVE / TRENDING / COMMUNITY), timestamp, title, location, body, comment/share counts, action button
+  - [x] Right panel: "What's happening" trending box with 3 trending items + "Show more"
+  - [x] Right panel: Emergency Help dark card (Police 999, Ambulance/SCDF 995, Haze Hotline)
+  - [ ] Replace hardcoded MOCK_FEED with live data from `GET /api/feed` once Sanjey ships it
 
 ### Backend
 
@@ -141,8 +149,9 @@ The platform does four things:
 ### Mock Data Needed
 
 - [x] 3-5 sample crisis objects (fire, flood, haze) with location, status, distance
-- [ ] Sample user profile (name, location)
+- [x] Sample user profile (hardcoded as "John" in Home page greeting)
 - [x] Sample notification/alert banner data
+- [x] 5 mock feed events for Timeline (Flash Flood, Haze Alert, Gas Leak, Power Outage, MRT Disruption)
 
 ---
 
@@ -205,6 +214,12 @@ The platform does four things:
 - [ ] `GET /api/data/haze` — latest PSI/PM2.5
 - [ ] `GET /api/data/dengue` — dengue cluster locations
 - [ ] `GET /api/data/transport` — MRT disruption status
+- [ ] **`GET /api/feed`** — **Timeline/Feed endpoint** (assigned to **Sanjey**)
+  - Returns merged, time-sorted list of crisis events for the Feed page
+  - Each item includes: `id`, `tag` (URGENT_ALERT | LIVE | TRENDING | COMMUNITY), `title`, `location`, `body`, `image_url`, `created_at`, `comment_count`, `share_count`, `help_needed`
+  - Query params: `?limit=20&offset=0` for pagination
+  - Sources: aggregate from `crises` table + ingested data events (weather, haze, transport)
+  - Sort: most recent first; URGENT_ALERT items always pinned to top within their time window
 
 ---
 
@@ -264,7 +279,7 @@ The platform does four things:
 - [x] **Chat Endpoints**
   - [x] `POST /api/chat` — send text message, return AI response (fully implemented)
   - [ ] `POST /api/chat/photo` — send image, return AI analysis
-- [ ] Chat history storage (in-memory for MVP, or DB)
+- [x] Chat history storage (in-memory per session via `sync.Map` in `lib/llm.go`, capped at 20 turns)
 
 ### Mock Data Needed
 
@@ -301,19 +316,19 @@ The platform does four things:
 
 - [ ] **Geospatial Queries**
   - [ ] `GET /api/crises/nearby?lat=&lng=&radius=` — crises within radius (Haversine or PostGIS)
-  - [ ] `GET /api/shelters?lat=&lng=` — nearest shelters sorted by distance
+  - [x] `GET /api/shelters?lat=&lng=` — returns shelters sorted by Haversine distance (fully implemented in `handler/map.go`)
 - [ ] **Shelter Data**
   - [ ] Parse shelter locations from OneMap / data.gov.sg
-  - [ ] Store in DB with coordinates and capacity
+  - [ ] Store in DB with coordinates and capacity (currently hardcoded — 10 community centres with lat/lng/capacity in handler)
 - [x] **Map Marker Endpoint**
-  - [x] `GET /api/map/markers?types=crises,shelters,hospitals` — returns all markers (route registered, handler stub)
+  - [x] `GET /api/map/markers?types=crises,shelters,hospitals` — route registered; returns `{"markers": []}` (stub, no real data yet)
 - [ ] **Crisis Detail Endpoint**
   - [ ] `GET /api/crises/:id` — aggregates crisis data from Sanjey's DB + triage summary from Perrin + task list
 
 ### Mock Data Needed
 
 - [ ] 5-10 crisis markers across Singapore (various types and severities)
-- [ ] 10+ shelter locations with capacity numbers
+- [x] 10 shelter locations with coordinates and capacity (hardcoded in `handler/map.go`)
 - [ ] 8 public hospital locations with bed counts
 
 ---
