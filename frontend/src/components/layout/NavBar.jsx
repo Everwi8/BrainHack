@@ -6,6 +6,7 @@ const NAV_LINKS = [
   { label: "Home",  path: "/home" },
   { label: "Map",   path: "/map" },
   { label: "Tasks", path: "/crisis" },
+  { label: "Feed",  path: "/timeline" },
   { label: "Chat",  path: "/chat" },
 ];
 
