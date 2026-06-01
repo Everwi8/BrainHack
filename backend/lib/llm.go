@@ -250,13 +250,40 @@ type visionRequest struct {
 	Messages []visionMessage `json:"messages"`
 }
 
-const visionInstruction = `Analyse the attached photo of a possible emergency or hazard in Singapore. Describe what you see, identify the type and severity of any crisis (flood, fire, haze, fallen tree, accident, etc.), and recommend immediate safety actions. If it looks life-threatening, lead with calling 995 (SCDF) or 999 (Police).`
+// PhotoObservation is the structured read of a photo produced by the vision
+// model. It is the hand-off between the vision stage and the text stage, and
+// is reused by triage (Phase 3) and task-card generation (Phase 4).
+type PhotoObservation struct {
+	CrisisType    string   `json:"crisis_type"` // flood, fire, haze, fallen_tree, road_accident, building_damage, medical, crowd, none, other
+	Severity      string   `json:"severity"`    // none, low, warning, high
+	Description   string   `json:"description"` // one factual sentence
+	Observations  []string `json:"observations"`
+	Hazards       []string `json:"hazards"`
+	PeoplePresent bool     `json:"people_present"`
+}
 
-// VisionLLM sends an image (as a base64 data URL) with an optional caption to
-// the vision model and returns Brainy's interpretation. A text summary of the
-// exchange is appended to the session history so follow-up text chat keeps
-// context, but the image itself is not stored (the text model can't see it).
-func VisionLLM(sessionID, caption, imageDataURL string) (string, error) {
+// visionExtractSystem instructs the vision model to return only structured
+// facts — no prose, no invented specifics. Keeping it to observable facts is
+// what stops the 12B model from hallucinating addresses/dates the way it does
+// when asked to write the full answer directly.
+const visionExtractSystem = `You are a vision analysis system for Singapore emergency response. Look at the photo and return ONLY a JSON object (no prose, no markdown fences) with exactly this shape:
+{
+  "crisis_type": "<one of: flood, fire, haze, fallen_tree, road_accident, building_damage, medical, crowd, none, other>",
+  "severity": "<one of: none, low, warning, high>",
+  "description": "<one factual sentence describing what is visibly in the image>",
+  "observations": ["<short factual visual details that are actually visible>"],
+  "hazards": ["<immediate physical dangers visible in the scene>"],
+  "people_present": <true or false>
+}
+Report ONLY what is visibly present. Do NOT invent or guess locations, place names, road names, building names, dates, addresses, or measurements — if it is not visible, leave it out.`
+
+// visionProseFallback is used only if structured extraction fails to parse, so
+// the user still gets a useful answer (degrades to the old direct-vision path).
+const visionProseFallback = `Analyse the attached photo of a possible emergency in Singapore. Describe only what is visibly present (do not invent locations, names, or dates), identify the crisis type and severity, and give immediate safety actions. For life-threatening situations lead with calling 995 (SCDF) or 999 (Police).`
+
+// callVisionModel posts a single image + text prompt to the vision model and
+// returns the raw reply text, sharing the retry transport.
+func callVisionModel(systemPrompt, userPrompt, imageDataURL string) (string, error) {
 	baseURL := os.Getenv("LLM_BASE_URL")
 	if baseURL == "" {
 		baseURL = defaultBaseURL
@@ -266,36 +293,98 @@ func VisionLLM(sessionID, caption, imageDataURL string) (string, error) {
 		model = defaultVisionModel
 	}
 
-	prompt := visionInstruction
-	if caption != "" {
-		prompt += "\n\nUser's note about the photo: " + caption
-	}
-
-	parts := []contentPart{
-		{Type: "text", Text: prompt},
-		{Type: "image_url", ImageURL: &imageURL{URL: imageDataURL}},
-	}
 	messages := []visionMessage{
-		{Role: "system", Content: []contentPart{{Type: "text", Text: brainySystem}}},
-		{Role: "user", Content: parts},
+		{Role: "system", Content: []contentPart{{Type: "text", Text: systemPrompt}}},
+		{Role: "user", Content: []contentPart{
+			{Type: "text", Text: userPrompt},
+			{Type: "image_url", ImageURL: &imageURL{URL: imageDataURL}},
+		}},
 	}
 
 	payload, err := json.Marshal(visionRequest{Model: model, Messages: messages})
 	if err != nil {
 		return "", fmt.Errorf("LLM marshal error: %w", err)
 	}
+	return postCompletion(baseURL, payload)
+}
 
-	reply, err := postCompletion(baseURL, payload)
+// ExtractPhotoObservation runs the vision model in structured-extraction mode
+// and returns the parsed observation. Exposed for triage/task-card reuse.
+func ExtractPhotoObservation(caption, imageDataURL string) (PhotoObservation, error) {
+	userPrompt := "Analyse this photo."
+	if caption != "" {
+		userPrompt += " The user's note about it: " + caption
+	}
+
+	raw, err := callVisionModel(visionExtractSystem, userPrompt, imageDataURL)
+	if err != nil {
+		return PhotoObservation{}, err
+	}
+
+	var obs PhotoObservation
+	if err := json.Unmarshal([]byte(stripJSONFences(raw)), &obs); err != nil {
+		return PhotoObservation{}, fmt.Errorf("vision JSON parse error: %w (raw: %s)", err, raw)
+	}
+	return obs, nil
+}
+
+// VisionLLM is the hybrid photo pipeline: the vision model extracts a
+// structured observation, then the stronger text model turns that into
+// Brainy's user-facing answer (with full session context and persona). The
+// exchange is recorded in session history so follow-up text chat keeps the
+// photo context. If structured extraction fails, it degrades gracefully to a
+// single direct-vision prose call.
+func VisionLLM(sessionID, caption, imageDataURL string) (string, error) {
+	obs, err := ExtractPhotoObservation(caption, imageDataURL)
+	if err != nil {
+		return visionProseDirect(sessionID, caption, imageDataURL)
+	}
+
+	// Hand the structured facts to the text model as a user turn. Storing this
+	// in history (rather than the raw image) gives later text turns context.
+	var b strings.Builder
+	b.WriteString("The user shared a photo. An automated vision system analysed it:\n")
+	fmt.Fprintf(&b, "- Type: %s\n- Severity: %s\n", obs.CrisisType, obs.Severity)
+	if obs.Description != "" {
+		fmt.Fprintf(&b, "- Description: %s\n", obs.Description)
+	}
+	if len(obs.Observations) > 0 {
+		fmt.Fprintf(&b, "- Observations: %s\n", strings.Join(obs.Observations, "; "))
+	}
+	if len(obs.Hazards) > 0 {
+		fmt.Fprintf(&b, "- Hazards: %s\n", strings.Join(obs.Hazards, "; "))
+	}
+	fmt.Fprintf(&b, "- People visible in frame: %t\n", obs.PeoplePresent)
+	if caption != "" {
+		fmt.Fprintf(&b, "\nThe user's note with the photo: %q\n", caption)
+	}
+	b.WriteString("\nRespond to the user about this photo: briefly describe the situation based only on these findings (do not invent details), then give the most important safety actions.")
+
+	appendHistory(sessionID, Message{Role: "user", Content: b.String()})
+	reply, err := chatCompletion(getHistory(sessionID))
+	if err != nil {
+		return "", err
+	}
+	appendHistory(sessionID, Message{Role: "assistant", Content: reply})
+	return reply, nil
+}
+
+// visionProseDirect is the fallback single-call path (vision model writes the
+// answer itself) used when structured extraction can't be parsed.
+func visionProseDirect(sessionID, caption, imageDataURL string) (string, error) {
+	userPrompt := visionProseFallback
+	if caption != "" {
+		userPrompt += "\n\nUser's note about the photo: " + caption
+	}
+	reply, err := callVisionModel(brainySystem, userPrompt, imageDataURL)
 	if err != nil {
 		return "", err
 	}
 
-	// Record a text-only trace so subsequent /api/chat turns have context.
 	userTrace := "[Shared a photo]"
 	if caption != "" {
 		userTrace += " " + caption
 	}
 	appendHistory(sessionID, Message{Role: "user", Content: userTrace}, Message{Role: "assistant", Content: reply})
-
 	return reply, nil
 }
