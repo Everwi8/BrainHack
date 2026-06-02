@@ -102,9 +102,9 @@ backend/
 frontend/src/
 ├── main.jsx                        ← React Router setup
 ├── App.jsx                         ← root layout + routes
-├── pages/Home.jsx                  ← crisis cards list (left) + Brainy panel (right)
-├── pages/Help.jsx                  ← "I Need Help" 8-tile grid + SOS-995 button
-├── components/layout/NavBar.jsx    ← Home / Map / Tasks / Feed / Chat tabs
+├── pages/Home.jsx                  
+├── pages/Help.jsx                  
+├── components/layout/NavBar.jsx    
 ├── components/crisis/CrisisCard.jsx
 └── components/crisis/BrainyPanel.jsx
 ```
