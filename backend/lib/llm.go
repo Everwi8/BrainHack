@@ -47,16 +47,22 @@ type Message struct {
 // ample room for Brainy's short replies and the task JSON envelope.
 const maxTokens = 2048
 
-// reasoningParam disables a model's chain-of-thought via OpenRouter's unified
-// reasoning control. Nemotron is a reasoning model: left on, it spends the
-// token budget thinking (returned in a separate field) and truncates the actual
-// content, and the long generation makes the body read time out. We never
-// surface reasoning, so it is disabled on every request.
+// reasoningParam toggles a model's chain-of-thought via OpenRouter's unified
+// reasoning control. Nemotron is a reasoning model, so this is set per call
+// rather than globally:
+//   - ON for the text-model answer paths (plain chat, the photo→answer step),
+//     where the 120B's deliberation improves SG-local advice.
+//   - OFF for structured JSON (ChatJSON) and the small vision model, where
+//     reasoning streams into the content field — blowing past max_tokens before
+//     any JSON appears and making the generation slow enough to time out.
 type reasoningParam struct {
 	Enabled bool `json:"enabled"`
 }
 
-var reasoningOff = reasoningParam{Enabled: false}
+var (
+	reasoningOff = reasoningParam{Enabled: false}
+	reasoningOn  = reasoningParam{Enabled: true}
+)
 
 type llmRequest struct {
 	Model     string         `json:"model"`
@@ -135,12 +141,13 @@ func requestTimeout() time.Duration {
 }
 
 // chatCompletion is the shared text core: it POSTs the given messages to the
-// chat-completions endpoint and returns the assistant reply text. Transient
+// chat-completions endpoint and returns the assistant reply text. The reasoning
+// flag is set per call (on for answers, off for structured JSON). Transient
 // failures (network errors, HTTP 429, and 5xx) are retried up to maxRetries
 // times with exponential backoff.
-func chatCompletion(messages []Message) (string, error) {
+func chatCompletion(messages []Message, reasoning reasoningParam) (string, error) {
 	_, baseURL, model := llmConfig()
-	payload, err := json.Marshal(llmRequest{Model: model, Messages: messages, MaxTokens: maxTokens, Reasoning: reasoningOff})
+	payload, err := json.Marshal(llmRequest{Model: model, Messages: messages, MaxTokens: maxTokens, Reasoning: reasoning})
 	if err != nil {
 		return "", fmt.Errorf("LLM marshal error: %w", err)
 	}
@@ -216,7 +223,7 @@ func ChatLLM(sessionID, userMessage string) (string, error) {
 	appendHistory(sessionID, Message{Role: "user", Content: userMessage})
 	history := getHistory(sessionID)
 
-	reply, err := chatCompletion(history)
+	reply, err := chatCompletion(history, reasoningOn)
 	if err != nil {
 		return "", err
 	}
@@ -243,7 +250,7 @@ func ChatJSON(systemPrompt, userPrompt string, target any) error {
 		{Role: "user", Content: userPrompt},
 	}
 
-	reply, err := chatCompletion(messages)
+	reply, err := chatCompletion(messages, reasoningOff)
 	if err != nil {
 		return err
 	}
@@ -430,7 +437,7 @@ func VisionLLM(sessionID, caption, imageDataURL string) (string, error) {
 	b.WriteString("\nRespond to the user about this photo: briefly describe the situation based only on these findings (do not invent details), then give the most important safety actions.")
 
 	appendHistory(sessionID, Message{Role: "user", Content: b.String()})
-	reply, err := chatCompletion(getHistory(sessionID))
+	reply, err := chatCompletion(getHistory(sessionID), reasoningOn)
 	if err != nil {
 		return "", err
 	}

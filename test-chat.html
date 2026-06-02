@@ -198,6 +198,16 @@
     return d.innerHTML;
   }
 
+  // Emoji per crisis type, so findings/tasks are scannable at a glance.
+  const TYPE_ICON = {
+    flood: '🌊', fire: '🔥', haze: '🌫️', dengue: '🦟',
+    transport: '🚆', cascade: '🔗', medical: '🚑',
+  };
+  function typeBadge(type) {
+    if (!type) return '';
+    return `${TYPE_ICON[type] || '⚠️'} <small>${esc(type)}</small> `;
+  }
+
   triageBtn.addEventListener('click', async () => {
     triageBtn.disabled = true;
     addMsg('Running cross-agency triage…', 'bot');
@@ -206,12 +216,15 @@
       const res = await fetch(TRIAGE_API);
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || res.statusText);
-      pending.textContent = `Triage: ${data.findings.length} finding(s)`;
-      for (const f of data.findings) {
-        addCard(`<span class="sev ${esc(f.severity)}">${esc(f.severity)}</span>`
-          + ` <span class="t">${esc(f.title)}</span>`
+      const findings = data.findings || [];
+      pending.textContent = `Triage: ${findings.length} finding(s)`;
+      for (const f of findings) {
+        addCard(`<span class="sev ${esc(f.severity)}">${esc(f.severity)}</span> `
+          + typeBadge(f.type)
+          + `<span class="t">${esc(f.title)}</span>`
           + (f.cascade ? ' 🔗' : '')
           + `<br>${esc(f.detail)}`
+          + (f.location ? `<br><small>📍 ${esc(f.location)}</small>` : '')
           + `<br><small>sources: ${esc((f.sources||[]).join(', '))}</small>`);
       }
     } catch (err) {
@@ -230,13 +243,16 @@
       const res = await fetch(TASKS_API);
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || res.statusText);
-      pending.textContent = `Generated ${data.tasks.length} task card(s)`;
-      for (const t of data.tasks) {
-        addCard(`<span class="sev ${esc(t.priority)}">${esc(t.priority)}</span>`
-          + ` <span class="t">${esc(t.title)}</span>`
+      const tasks = data.tasks || [];
+      pending.textContent = `Generated ${tasks.length} task card(s)`;
+      for (const t of tasks) {
+        addCard(`<span class="sev ${esc(t.priority)}">${esc(t.priority)}</span> `
+          + typeBadge(t.type)
+          + `<span class="t">${esc(t.title)}</span>`
           + ` <small>· ${esc(t.volunteers_needed)} volunteer(s)</small>`
           + `<br>${esc(t.description)}`
-          + (t.location ? `<br><small>📍 ${esc(t.location)}</small>` : ''));
+          + (t.location ? `<br><small>📍 ${esc(t.location)}</small>` : '')
+          + (t.crisis_id ? `<br><small>crisis: ${esc(t.crisis_id)}</small>` : ''));
       }
     } catch (err) {
       pending.className = 'msg error';
