@@ -55,14 +55,23 @@ func main() {
 		// Tasks — reads are public, writes require auth
 		api.GET("/tasks", handler.ListTasks)
 		api.POST("/tasks", middleware.RequireAuth(), handler.CreateTask)
-		api.PUT("/tasks/:id", middleware.RequireAuth(), handler.UpdateTask)
+		api.PATCH("/tasks/:id", middleware.RequireAuth(), handler.UpdateTask)
 		api.DELETE("/tasks/:id", middleware.RequireAuth(), handler.DeleteTask)
 
-		// Perrin — AI chat
+		// Perrin — AI chat + triage
 		api.POST("/chat", handler.Chat)
 		api.POST("/chat/photo", handler.ChatPhoto)
 		api.GET("/triage", handler.Triage)
 		api.GET("/triage/tasks", handler.TriageTasks)
+
+		// Data endpoints (Sanjey)
+		api.GET("/data/weather", handler.GetWeather)
+		api.GET("/data/haze", handler.GetHaze)
+		api.GET("/data/floods", handler.GetFloods)
+		api.GET("/data/transport", handler.GetTransport)
+		api.GET("/data/dengue", handler.GetDengue)
+		api.GET("/hospitals", handler.GetHospitals)
+		api.GET("/feed", handler.GetFeed)
 
 		// Jerald — map markers
 		api.GET("/map/markers", handler.MapMarkers)

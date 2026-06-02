@@ -68,7 +68,7 @@ var DB *Client
 func Init() {
 	DB = &Client{
 		baseURL:    os.Getenv("SUPABASE_URL"),
-		serviceKey: os.Getenv("SUPABASE_SERVICE_ROLE_KEY"),
+		serviceKey: os.Getenv("SUPABASE_SECRET_KEY"),
 		http:       &http.Client{Timeout: 10 * time.Second},
 	}
 }
@@ -118,6 +118,16 @@ func (c *Client) req(method, path string, body interface{}, extra map[string]str
 
 func (c *Client) GetCrises() ([]Crisis, error) {
 	data, err := c.req("GET", "crises?status=eq.active&select=*&order=created_at.desc", nil, nil)
+	if err != nil {
+		return nil, err
+	}
+	var out []Crisis
+	return out, json.Unmarshal(data, &out)
+}
+
+func (c *Client) GetCrisesPaged(limit, offset int) ([]Crisis, error) {
+	path := fmt.Sprintf("crises?status=eq.active&select=*&order=created_at.desc&limit=%d&offset=%d", limit, offset)
+	data, err := c.req("GET", path, nil, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -178,6 +188,18 @@ func (c *Client) CreateTask(task Task) (*Task, error) {
 
 func (c *Client) UpdateTask(id string, updates map[string]interface{}) (*Task, error) {
 	data, err := c.req("PATCH", "tasks?id=eq."+id, updates, nil)
+	if err != nil {
+		return nil, err
+	}
+	var rows []Task
+	if err := json.Unmarshal(data, &rows); err != nil || len(rows) == 0 {
+		return nil, fmt.Errorf("task not found")
+	}
+	return &rows[0], nil
+}
+
+func (c *Client) GetTaskByID(id string) (*Task, error) {
+	data, err := c.req("GET", "tasks?id=eq."+id+"&select=*", nil, nil)
 	if err != nil {
 		return nil, err
 	}

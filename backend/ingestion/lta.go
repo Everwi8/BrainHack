@@ -47,19 +47,17 @@ func RunLTA(ctx context.Context) {
 	}
 }
 
-type ltaResponse struct {
-	Value []struct {
-		Status           int    `json:"Status"` // 1 = Normal, 2 = Disrupted
-		AffectedSegments []struct {
-			Line      string `json:"Line"`
-			Direction string `json:"Direction"`
-			Stations  string `json:"Stations"`
-		} `json:"AffectedSegments"`
-		Message []struct {
-			Content     string `json:"Content"`
-			CreatedDate string `json:"CreatedDate"`
-		} `json:"Message"`
-	} `json:"value"`
+type ltaAlert struct {
+	Status           int    `json:"Status"` // 1 = Normal, 2 = Disrupted
+	AffectedSegments []struct {
+		Line      string `json:"Line"`
+		Direction string `json:"Direction"`
+		Stations  string `json:"Stations"`
+	} `json:"AffectedSegments"`
+	Message []struct {
+		Content     string `json:"Content"`
+		CreatedDate string `json:"CreatedDate"`
+	} `json:"Message"`
 }
 
 // lineCoords maps MRT line codes to approximate midpoint coordinates.
@@ -92,12 +90,21 @@ func fetchLTA() error {
 		return err
 	}
 
-	var data ltaResponse
-	if err := json.Unmarshal(body, &data); err != nil {
+	// LTA returns {"value": {}} (object) when no disruptions, {"value": [...]} when active.
+	var raw struct {
+		Value json.RawMessage `json:"value"`
+	}
+	if err := json.Unmarshal(body, &raw); err != nil {
 		return err
 	}
+	var alerts []ltaAlert
+	if len(raw.Value) > 0 && raw.Value[0] == '[' {
+		if err := json.Unmarshal(raw.Value, &alerts); err != nil {
+			return err
+		}
+	}
 
-	for _, alert := range data.Value {
+	for _, alert := range alerts {
 		if alert.Status == 1 {
 			// Normal — resolve any existing disruption crisis for this alert.
 			continue
