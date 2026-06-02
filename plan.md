@@ -87,6 +87,8 @@ The platform does four things:
 | `/api/tasks/:id` | PATCH | Sanjey | James |
 | `/api/chat` | POST | Perrin | Perrin |
 | `/api/chat/photo` | POST | Perrin | Perrin |
+| `/api/triage` | GET | Perrin | Perrin, Jerald |
+| `/api/triage/tasks` | GET | Perrin | Perrin, James |
 | `/api/volunteers` | GET/POST | James | James, Jerald |
 | `/api/volunteers/match` | POST | James | James |
 | `/api/groupchat/:crisisId` | GET/POST | James | James |
@@ -232,6 +234,7 @@ The platform does four things:
   - [x] Brainy avatar next to AI messages
   - [x] Timestamps on messages
   - [x] Auto-scroll to latest message
+  - [x] Text chat wired to real `POST /api/chat` (was mock-only) with graceful fallback to canned responses if the backend is unreachable
 - [x] **Chat Input Bar**
   - [x] Text field with send button
   - [x] Camera icon button for photo capture
@@ -243,8 +246,8 @@ The platform does four things:
   - [x] AI response with situation analysis
 - [x] **Inline Rich Cards in Chat**
   - [x] Shelter card (name, distance, "View Map" link) — like the Pasir Ris Community Club card
-  - [ ] Hospital card (name, bed availability)
-  - [ ] Crisis summary card
+  - [x] Hospital card (name, bed availability) — `InlineHospitalCard.jsx` (bed fraction + availability bar)
+  - [x] Crisis summary card — `InlineCrisisCard.jsx` (shaped like a triage `TriageFinding`; severity-coloured, type icon)
 - [x] **Quick-Action Chips**
   - [x] Persistent bottom bar: Floods, Shelters, Help, Find out more
   - [x] Tapping a chip sends it as a message
@@ -260,18 +263,20 @@ The platform does four things:
   - [x] Error handling for API failures
   - [x] Structured JSON output parsing for task cards (`ChatJSON` helper in `llm.go`)
   - [x] Retry logic for transient API failures (3 attempts, exponential backoff on 429/5xx/network)
-- [ ] **Triage Logic**
-  - [ ] Threshold rules: water level > X% → flood warning
-  - [ ] Threshold rules: PSI > 100 → haze advisory
-  - [ ] Threshold rules: dengue cases > X in cluster → health alert
-  - [ ] Cascade rules: heavy rain + high water → flood risk
-  - [ ] Cascade rules: flood at location + nearby MRT → transport disruption
-  - [ ] Cascade rules: high PSI + dengue cluster → compound health risk
-  - [ ] Feed live data from Sanjey's endpoints into prompt context
-- [ ] **Auto Task Card Generation**
-  - [ ] AI generates structured task card JSON from triage output
-  - [ ] POST generated tasks to Sanjey's `/api/tasks` endpoint
-  - [ ] Task fields: title, description, priority, volunteers_needed, crisis_id
+- [x] **Triage Logic** (`backend/lib/triage.go`, against mock data via `DataProvider`)
+  - [x] Threshold rules: water level ≥ 75% → flood warning (≥ 90% critical)
+  - [x] Threshold rules: PSI ≥ 100 → haze advisory (≥ 200 critical)
+  - [x] Threshold rules: dengue cases ≥ 10 in cluster → health alert (≥ 50 critical)
+  - [x] Cascade rules: heavy rain + high water (same area) → flash-flood risk
+  - [x] Cascade rules: flood within 1.5 km of MRT → transport disruption
+  - [x] Cascade rules: high PSI + dengue cluster → compound health risk
+  - [x] Feed triage findings into Brainy's prompt context (live situational-awareness system message on session start); swaps to Sanjey's endpoints via `SetDataProvider` when live
+  - [x] `GET /api/triage` endpoint exposes the sorted report
+- [x] **Auto Task Card Generation** (`backend/lib/taskgen.go`)
+  - [x] AI generates structured task card JSON from triage output (via `ChatJSON`); deterministic fallback if the LLM call fails
+  - [x] POST generated tasks to Sanjey's `/api/tasks` endpoint — `ForwardTasks` best-effort (log-only while the handler is a stub)
+  - [x] Task fields: title, description, priority, volunteers_needed, crisis_id (+ type, location)
+  - [x] `GET /api/triage/tasks` endpoint exposes the generated cards
 - [x] **Photo Interpretation**
   - [x] Accept image upload via `POST /api/chat/photo` (multipart, 8 MB cap, content-type sniffed)
   - [x] Send image to vision model — `nvidia/nemotron-nano-12b-v2-vl:free` (OpenRouter), not Gemini Flash; base64 data URL via `VisionLLM`

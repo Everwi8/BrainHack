@@ -47,30 +47,38 @@ Sanjey's data layer is **empty stubs**:
 - [x] Frontend (`ChatInput.jsx` / `Chat.jsx`): camera/file-picker button → preview before send → upload with loading indicator → render AI response. → `api.postForm` added.
 - [ ] Test fixtures: sample flood/fire/haze photos. → still TODO (tested with a synthetic flood image, not committed).
 
-## Phase 3 — Triage Logic (against mock data)
+## Phase 3 — Triage Logic (against mock data) ✅
 
-- [ ] New `backend/lib/triage.go`.
-- [ ] Define a `DataProvider` interface (weather, floods, haze, dengue, transport) with a **mock implementation** now; real impl wraps Sanjey's endpoints later.
-- [ ] Threshold rules:
-  - [ ] water level > X% → flood warning
-  - [ ] PSI > 100 → haze advisory
-  - [ ] dengue cases > X in cluster → health alert
-- [ ] Cascade rules:
-  - [ ] heavy rain + high water → flood risk
-  - [ ] flood at location + nearby MRT → transport disruption
-  - [ ] high PSI + dengue cluster → compound health risk
-- [ ] Feed triage findings into Brainy's prompt context for richer chat answers.
+- [x] New `backend/lib/triage.go` (+ `triage_mock.go`, `triage_test.go`).
+- [x] Define a `DataProvider` interface (weather, floods, haze, dengue, transport) with a **mock implementation** now; real impl wraps Sanjey's endpoints later via `SetDataProvider`. → `MockProvider` ships demo-tuned SG readings.
+- [x] Threshold rules (centralised consts):
+  - [x] water level ≥ 75% → flood warning, ≥ 90% → critical
+  - [x] PSI ≥ 100 → haze advisory, ≥ 200 → critical
+  - [x] dengue cases ≥ 10 → cluster warning, ≥ 50 → critical
+  - [x] transport status delayed → warning, disrupted → critical
+- [x] Cascade rules:
+  - [x] heavy rain + high water **in same area** → flash-flood risk (critical)
+  - [x] flood within 1.5 km of an MRT station → transport disruption (warning)
+  - [x] PSI ≥ 100 overlapping a dengue cluster → compound health risk (warning)
+- [x] Feed triage findings into Brainy's prompt context — `currentTriageContext()` injects a live situational-awareness system message when a chat session starts (fails open: empty/skipped if triage errors).
+- [x] `GET /api/triage` endpoint (`handler/triage.go`, registered in `main.go`) returns the sorted `TriageReport` — testable/demoable. Verified: mock data trips all four threshold types + all three cascades, sorted critical-first.
+- [x] **Live in the UI:** the chat's "Situation" quick chip (`Chat.jsx → showSituation`) fetches `GET /api/triage` and renders the top 3 findings as `InlineCrisisCard`s — real triage data driving the chat (graceful fallback to a canned card if the backend is down).
 
-## Phase 4 — Auto Task-Card Generation
+## Phase 4 — Auto Task-Card Generation ✅
 
-- [ ] LLM produces structured task-card JSON from triage output via the Phase 1 JSON helper.
-- [ ] Fields: `title`, `description`, `priority`, `volunteers_needed`, `crisis_id`.
-- [ ] POST generated tasks to `/api/tasks` (Sanjey's endpoint) — with a graceful fallback/log since that handler is currently a stub.
+- [x] LLM produces structured task-card JSON from triage output via the Phase 1 `ChatJSON` helper. → `backend/lib/taskgen.go`, `GenerateTaskCards` / `GenerateTasksFromTriage`.
+- [x] Fields: `title`, `description`, `priority`, `volunteers_needed`, `crisis_id` (+ `type`, `location` for the map/group chat).
+- [x] POST generated tasks to `/api/tasks` — `ForwardTasks` best-effort POSTs to `TASKS_SINK_URL` (log-only while Sanjey's handler is a stub).
+- [x] `GET /api/triage/tasks` endpoint runs triage → generates cards → forwards → returns them. **Verified live:** 6 distinct LLM-authored cards in ~15s.
+- [x] Robustness: findings deduped by location + capped to 6; deterministic action-oriented fallback guarantees clean cards if the LLM call fails (verified — fallback also produces demo-ready cards).
+
+### LLM gotcha (resolved) ⚠️
+`nvidia/nemotron-3-super-120b` is a **reasoning model** — left unconstrained it streamed its entire chain-of-thought into the content field, which (a) made task-gen take minutes / hit the read timeout, and (b) when capped at `max_tokens`, consumed the budget thinking and truncated the JSON. Fixes in `llm.go`: disable reasoning at the API level (`reasoning: {enabled:false}` on every request) + `detailed thinking off` system directive on `ChatJSON` + `max_tokens` 2048 + robust `extractJSON` (handles fences/surrounding prose) + `LLM_TIMEOUT_SECONDS` env knob. Reasoning-off also sped up plain chat (~4s).
 
 ## Phase 5 — Polish
 
-- [ ] Keep chat history in-memory for MVP (revisit DB only if needed).
-- [~] Update `test-chat.html` to exercise photo + triage paths. → photo path done; triage path pending Phase 3.
+- [x] Keep chat history in-memory for MVP (revisit DB only if needed). → `sessionStore sync.Map` in `llm.go`, system prompt + last 20 turns per session.
+- [x] Update `test-chat.html` to exercise photo + triage paths. → photo path done; added 🔎 Triage + 📋 Generate Tasks toolbar buttons that render findings/task cards.
 - [x] Document the new endpoints in the API contract section of `plan.md`. → `/api/chat/photo` already in the contract table.
 
 ---

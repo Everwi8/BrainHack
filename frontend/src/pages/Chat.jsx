@@ -1,20 +1,41 @@
 import { useState, useRef, useEffect } from "react";
-import { Waves, House, Zap, AlertTriangle, Bot, X } from "lucide-react";
+import { Waves, House, Zap, AlertTriangle, Activity, Bot, X } from "lucide-react";
 import Navbar from "../components/layout/NavBar";
 import BrainyMascot from "../components/BrainyMascot";
 import MessageBubble from "../components/chat/MessageBubble";
 import ChatInput from "../components/chat/ChatInput";
 import InlineShelterCard from "../components/chat/InlineShelterCard";
+import InlineHospitalCard from "../components/chat/InlineHospitalCard";
+import InlineCrisisCard from "../components/chat/InlineCrisisCard";
 import { api } from "../lib/api";
 
 // ── Mock responses (swap out for real API call when backend is ready) ──────────
 const MOCK_RESPONSES = {
   flood: {
     text: "Current flood alerts in your area:\n• **Pasir Ris Drive 3** — Active (water level rising)\n• **Tampines Ave 5** — Warning\n\nAvoid flooded roads and move valuables to higher ground. Do you want me to show nearby evacuation routes?",
+    crisisCard: {
+      type: "flood", severity: "critical",
+      title: "Flash flood: Pasir Ris Dr 3",
+      location: "Pasir Ris Drive 3, near Block 512",
+      detail: "Water level at 88% of capacity — flooding likely. Avoid the area and move to higher ground.",
+    },
   },
   shelter: {
     text: "Here are the nearest emergency shelters to your current location:",
     shelterCard: { name: "Pasir Ris Community Club", distance: "400m away", status: "Open" },
+  },
+  hospital: {
+    text: "Here are the nearest hospitals and their latest reported bed availability:",
+    hospitalCard: { name: "Changi General Hospital", distance: "2.3 km away", beds: 42, total: 180 },
+  },
+  situation: {
+    text: "Here's the most urgent situation near you right now:",
+    crisisCard: {
+      type: "cascade", severity: "critical",
+      title: "Flash-flood cascade: Pasir Ris Dr 3",
+      location: "Pasir Ris Drive 3",
+      detail: "Heavy thundery showers over Pasir Ris while the canal is at 88% capacity — flash flooding likely within the hour. Avoid underpasses and low-lying roads.",
+    },
   },
   haze: {
     text: "The PSI reading is currently **42 (Good)** islandwide. Haze has cleared and outdoor activities are safe for now. I'll notify you if conditions change.",
@@ -38,6 +59,8 @@ const MOCK_RESPONSES = {
 
 function getBotResponse(text) {
   const lower = text.toLowerCase();
+  if (lower.includes("hospital") || lower.includes("bed") || lower.includes("medical")) return MOCK_RESPONSES.hospital;
+  if (lower.includes("situation") || lower.includes("summary") || lower.includes("happening")) return MOCK_RESPONSES.situation;
   if (lower.includes("flood") || lower.includes("water"))       return MOCK_RESPONSES.flood;
   if (lower.includes("shelter") || lower.includes("evacuate"))  return MOCK_RESPONSES.shelter;
   if (lower.includes("haze") || lower.includes("psi") || lower.includes("air")) return MOCK_RESPONSES.haze;
@@ -72,6 +95,7 @@ const INITIAL_MESSAGES = [
 ];
 
 const QUICK_CHIPS = [
+  { label: "Situation",     Icon: Activity,       color: "#0F766E", bg: "#CCFBF1", action: "situation" },
   { label: "Floods",        Icon: Waves,         color: "#2563EB", bg: "#DBEAFE" },
   { label: "Shelters",      Icon: House,          color: "#D97706", bg: "#FEF3C7" },
   { label: "Help",          Icon: Zap,            color: "#DC2626", bg: "#FEE2E2" },
@@ -176,7 +200,7 @@ export default function Chat() {
     }
   };
 
-  const sendMessage = (text) => {
+  const sendMessage = async (text) => {
     const trimmed = (text ?? input).trim();
     if (!trimmed || isTyping) return;
 
@@ -185,13 +209,63 @@ export default function Chat() {
     setInput("");
     setIsTyping(true);
 
-    // Simulate network / AI latency (replace with real fetch when backend is ready)
-    const delay = 1000 + Math.random() * 800;
-    setTimeout(() => {
-      const response = getBotResponse(trimmed);
-      setMessages(prev => [...prev, { id: Date.now(), role: "bot", timestamp: nowTime(), ...response }]);
+    // Inline rich cards are still keyword-driven from mock data until Sanjey's
+    // crisis/shelter/hospital endpoints are live; we attach them to whichever
+    // reply we end up showing (real or fallback).
+    const mock = getBotResponse(trimmed);
+    const cards = {
+      shelterCard: mock.shelterCard,
+      hospitalCard: mock.hospitalCard,
+      crisisCard: mock.crisisCard,
+    };
+
+    try {
+      const res = await api.post("/api/chat", { message: trimmed, session_id: sessionId });
+      if (res.session_id) setSessionId(res.session_id);
+      setMessages(prev => [...prev, {
+        id: Date.now(), role: "bot", text: res.reply, timestamp: nowTime(), ...cards,
+      }]);
+    } catch {
+      // Backend unreachable — degrade gracefully to the canned response so the
+      // demo keeps working offline.
+      setMessages(prev => [...prev, { id: Date.now(), role: "bot", timestamp: nowTime(), ...mock }]);
+    } finally {
       setIsTyping(false);
-    }, delay);
+    }
+  };
+
+  // showSituation pulls the live triage report and renders the top findings as
+  // crisis cards — this is the AI triage backend driving the chat with real
+  // data. Falls back to the canned situation card if the backend is down.
+  const showSituation = async () => {
+    if (isTyping) return;
+    setMessages(prev => [...prev, {
+      id: Date.now(), role: "user", text: "What's the current situation?", timestamp: nowTime(),
+    }]);
+    setIsTyping(true);
+    try {
+      const report = await api.get("/api/triage");
+      const top = (report.findings ?? []).slice(0, 3).map(f => ({
+        type: f.type, severity: f.severity, title: f.title,
+        location: f.location, detail: f.detail,
+      }));
+      if (top.length === 0) {
+        setMessages(prev => [...prev, {
+          id: Date.now(), role: "bot", timestamp: nowTime(),
+          text: "Good news — no active alerts across Singapore right now. I'll let you know if anything changes.",
+        }]);
+      } else {
+        setMessages(prev => [...prev, {
+          id: Date.now(), role: "bot", timestamp: nowTime(),
+          text: `Here are the ${top.length} most urgent situations across Singapore right now:`,
+          crisisCards: top,
+        }]);
+      }
+    } catch {
+      setMessages(prev => [...prev, { id: Date.now(), role: "bot", timestamp: nowTime(), ...MOCK_RESPONSES.situation }]);
+    } finally {
+      setIsTyping(false);
+    }
   };
 
   return (
@@ -260,6 +334,33 @@ export default function Chat() {
                     status={msg.shelterCard.status}
                   />
                 )}
+                {msg.hospitalCard && (
+                  <InlineHospitalCard
+                    name={msg.hospitalCard.name}
+                    distance={msg.hospitalCard.distance}
+                    beds={msg.hospitalCard.beds}
+                    total={msg.hospitalCard.total}
+                  />
+                )}
+                {msg.crisisCard && (
+                  <InlineCrisisCard
+                    type={msg.crisisCard.type}
+                    severity={msg.crisisCard.severity}
+                    title={msg.crisisCard.title}
+                    location={msg.crisisCard.location}
+                    detail={msg.crisisCard.detail}
+                  />
+                )}
+                {msg.crisisCards?.map((c, i) => (
+                  <InlineCrisisCard
+                    key={i}
+                    type={c.type}
+                    severity={c.severity}
+                    title={c.title}
+                    location={c.location}
+                    detail={c.detail}
+                  />
+                ))}
               </MessageBubble>
             ))}
             {isTyping && <TypingIndicator />}
@@ -268,10 +369,10 @@ export default function Chat() {
 
           {/* Quick-action chips */}
           <div style={{ display: "flex", gap: 8, padding: "10px 0 10px", flexWrap: "wrap" }}>
-            {QUICK_CHIPS.map(({ label, Icon, color, bg }) => (
+            {QUICK_CHIPS.map(({ label, Icon, color, bg, action }) => (
               <button
                 key={label}
-                onClick={() => sendMessage(label)}
+                onClick={() => (action === "situation" ? showSituation() : sendMessage(label))}
                 disabled={isTyping}
                 style={{
                   display: "flex", alignItems: "center", gap: 6,
