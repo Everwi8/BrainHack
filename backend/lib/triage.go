@@ -3,10 +3,11 @@
 // cascade rules, and produces a TriageReport. The findings also feed Brainy's
 // chat prompt so answers reflect the current situation.
 //
-// The data layer (Sanjey's /api/data/* endpoints + ingestion package) is still
-// stubbed, so triage runs against MockProvider for now. When the real endpoints
-// land, a thin DataProvider implementation that wraps them swaps in via
-// SetDataProvider — no rule changes needed.
+// Sanjey's ingestion layer landed: instead of granular /api/data/* endpoints it
+// aggregates everything into the crises table (GET /api/crises). The live
+// CrisisDataProvider (triage_live.go) derives the readings below from those rows
+// and swaps in via SetDataProvider — see SelectDataProvider. MockProvider stays
+// as the offline/demo fallback. The rules here are unchanged either way.
 package lib
 
 import (
@@ -21,11 +22,17 @@ import (
 // Data shapes (what the DataProvider returns)
 // ---------------------------------------------------------------------------
 
+// CrisisID, where set, links a reading back to the originating crisis row in
+// Sanjey's store (populated by the live provider). It lets findings — and the
+// task cards derived from them — reference a real crisis_id FK. The mock
+// provider leaves it empty.
+
 // WeatherReading is a per-area forecast/nowcast snapshot.
 type WeatherReading struct {
 	Area       string  `json:"area"`
 	Forecast   string  `json:"forecast"`    // e.g. "Heavy Thundery Showers"
 	RainfallMM float64 `json:"rainfall_mm"` // recent rainfall, millimetres
+	CrisisID   string  `json:"crisis_id,omitempty"`
 }
 
 // FloodReading is a single PUB water-level sensor reading.
@@ -35,13 +42,15 @@ type FloodReading struct {
 	Lat           float64 `json:"lat"`
 	Lng           float64 `json:"lng"`
 	WaterLevelPct float64 `json:"water_level_pct"` // % of drain/canal capacity
+	CrisisID      string  `json:"crisis_id,omitempty"`
 }
 
 // HazeReading is a regional PSI/PM2.5 reading.
 type HazeReading struct {
-	Region string `json:"region"` // north, south, east, west, central
-	PSI    int    `json:"psi"`
-	PM25   int    `json:"pm25"`
+	Region   string `json:"region"` // north, south, east, west, central
+	PSI      int    `json:"psi"`
+	PM25     int    `json:"pm25"`
+	CrisisID string `json:"crisis_id,omitempty"`
 }
 
 // DengueCluster is an active NEA dengue cluster.
@@ -50,6 +59,7 @@ type DengueCluster struct {
 	Lat      float64 `json:"lat"`
 	Lng      float64 `json:"lng"`
 	Cases    int     `json:"cases"`
+	CrisisID string  `json:"crisis_id,omitempty"`
 }
 
 // TransportDisruption is an LTA MRT/bus service disruption.
@@ -58,6 +68,7 @@ type TransportDisruption struct {
 	Stations    []string `json:"stations"`
 	Status      string   `json:"status"` // normal, delayed, disrupted
 	Description string   `json:"description"`
+	CrisisID    string   `json:"crisis_id,omitempty"`
 }
 
 // DataProvider supplies the latest cross-agency readings. The mock implements
@@ -89,8 +100,9 @@ type TriageFinding struct {
 	Title    string   `json:"title"`
 	Detail   string   `json:"detail"`
 	Location string   `json:"location,omitempty"`
-	Sources  []string `json:"sources"`           // agencies/data that drove it (NEA, PUB, LTA, MOH)
-	Cascade  bool     `json:"cascade,omitempty"` // true if derived from a multi-signal cascade rule
+	Sources  []string `json:"sources"`             // agencies/data that drove it (NEA, PUB, LTA, MOH)
+	Cascade  bool     `json:"cascade,omitempty"`   // true if derived from a multi-signal cascade rule
+	CrisisID string   `json:"crisis_id,omitempty"` // originating crisis row, when triage runs on live data
 }
 
 // TriageReport is the full set of findings at a point in time.
@@ -190,6 +202,7 @@ func floodFindings(floods []FloodReading) []TriageFinding {
 				Detail:   fmt.Sprintf("Water level at %.0f%% of capacity — flooding likely. Avoid the area and move to higher ground.", f.WaterLevelPct),
 				Location: f.Location,
 				Sources:  []string{"PUB"},
+				CrisisID: f.CrisisID,
 			})
 		case f.WaterLevelPct >= floodWarnPct:
 			out = append(out, TriageFinding{
@@ -199,6 +212,7 @@ func floodFindings(floods []FloodReading) []TriageFinding {
 				Detail:   fmt.Sprintf("Water level at %.0f%% of capacity. Stay alert and avoid low-lying paths nearby.", f.WaterLevelPct),
 				Location: f.Location,
 				Sources:  []string{"PUB"},
+				CrisisID: f.CrisisID,
 			})
 		}
 	}
@@ -218,6 +232,7 @@ func hazeFindings(haze []HazeReading) []TriageFinding {
 				Detail:   "Air quality is very unhealthy. Stay indoors, keep windows shut, and wear an N95 mask if you must go out. Vulnerable groups should avoid all outdoor activity.",
 				Location: region,
 				Sources:  []string{"NEA"},
+				CrisisID: h.CrisisID,
 			})
 		case h.PSI >= hazeWarnPSI:
 			out = append(out, TriageFinding{
@@ -227,6 +242,7 @@ func hazeFindings(haze []HazeReading) []TriageFinding {
 				Detail:   "Air quality is unhealthy. Reduce prolonged outdoor exertion; the elderly, children, and those with heart/lung conditions should stay indoors.",
 				Location: region,
 				Sources:  []string{"NEA"},
+				CrisisID: h.CrisisID,
 			})
 		}
 	}
@@ -245,6 +261,7 @@ func dengueFindings(clusters []DengueCluster) []TriageFinding {
 				Detail:   fmt.Sprintf("%d cases reported. Remove stagnant water, apply repellent, and see a doctor for fever with body aches.", d.Cases),
 				Location: d.Locality,
 				Sources:  []string{"NEA"},
+				CrisisID: d.CrisisID,
 			})
 		case d.Cases >= dengueWarnCnt:
 			out = append(out, TriageFinding{
@@ -254,6 +271,7 @@ func dengueFindings(clusters []DengueCluster) []TriageFinding {
 				Detail:   fmt.Sprintf("%d cases reported. Do the Mozzie Wipeout and use repellent.", d.Cases),
 				Location: d.Locality,
 				Sources:  []string{"NEA"},
+				CrisisID: d.CrisisID,
 			})
 		}
 	}
@@ -277,6 +295,7 @@ func transportFindings(disruptions []TransportDisruption) []TriageFinding {
 			Detail:   t.Description,
 			Location: strings.Join(t.Stations, ", "),
 			Sources:  []string{"LTA"},
+			CrisisID: t.CrisisID,
 		})
 	}
 	return out

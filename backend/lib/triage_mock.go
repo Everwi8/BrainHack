@@ -1,7 +1,9 @@
-// Perrin — Mock data + geo helpers for triage. This stands in for Sanjey's
-// /api/data/* endpoints (still stubbed). The numbers are deliberately tuned to
-// trip several rules at once so the demo shows real findings and a cascade.
-// Swap to live data with lib.SetDataProvider(...) when the endpoints land.
+// Perrin — Mock data + geo helpers for triage. MockProvider is the offline/demo
+// fallback used when SUPABASE_URL is unset or a live fetch fails (see
+// triage_live.go's CrisisDataProvider for the real source). The numbers are
+// deliberately tuned to trip several rules at once so the demo shows real
+// findings and a cascade even with no live data. The geo helpers below
+// (nearbyMRT, regionContains, haversineKm) are shared by the triage rules.
 package lib
 
 import "math"

@@ -21,6 +21,10 @@ func main() {
 
 	lib.Init()
 
+	// Pick the triage data source: live (Sanjey's crises table) when SUPABASE_URL
+	// is configured, else mock demo data. See lib.SelectDataProvider.
+	lib.SelectDataProvider()
+
 	// ── Ingestion goroutines ──────────────────────────────────────────────────
 	// Each script polls its data source every 5 minutes and upserts to Supabase.
 	ctx, cancel := context.WithCancel(context.Background())

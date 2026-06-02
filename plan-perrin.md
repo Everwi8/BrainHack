@@ -23,13 +23,24 @@
 - **Phase 1 (chat robustness):** retry w/ exponential backoff on 429/5xx/network (shared `postCompletion` transport), `ChatJSON` structured-output helper (+ `stripJSONFences`).
 - **Phase 2 (photo interpretation):** `VisionLLM` (base64 data-URL → VL model), `POST /api/chat/photo` handler (multipart, 8 MB cap, content-sniff validation), session-history trace so text follow-ups keep photo context. Frontend: camera→preview→send→render wired in `ChatInput.jsx`/`Chat.jsx`; `api.postForm` added. `test-chat.html` updated to exercise the photo path. **Verified end-to-end** against live OpenRouter (flood photo → correct severity/advice; follow-up text recalled the photo).
 
-### Key constraint ⚠️
-Sanjey's data layer is **empty stubs**:
-- `handler/crises.go`, `handler/tasks.go` — empty function bodies.
-- `ingestion/nea.go`, `pub.go`, `lta.go`, `moh.go` — package decl only.
-- `cache/cache.go` — package decl only.
+### Key constraint — RESOLVED ✅
+Sanjey's data layer is now **live** (was empty stubs). It landed with a different
+shape than the plan assumed: instead of granular `/api/data/*` endpoints, his
+ingestion (`ingestion/nea.go`, `pub.go`, `lta.go`) aggregates every signal into
+the **crises table** (`GET /api/crises` / `lib.DB.GetCrises`), and severity uses
+`low/medium/high/critical` (not our `low/warning/critical`).
 
-→ Triage and task-card generation **must run against mock data**, designed behind a small interface so they swap to real endpoints later.
+Our parts are wired to it:
+- `lib/triage_live.go` — `CrisisDataProvider` adapts crisis rows back into the
+  per-signal readings the triage rules expect (severity→metric mapping, value
+  parsing, source split for flood vs. weather). Carries the real `crisis_id`.
+- `main.go` calls `lib.SelectDataProvider()` — auto-uses live data when
+  `SUPABASE_URL` is set, else `MockProvider` (offline/demo). Override with
+  `TRIAGE_PROVIDER=live|mock`. Live fetch errors fall back to mock so chat/triage
+  never break.
+- `lib/taskgen.go` — `ForwardTasks` now writes real task rows via `lib.DB`
+  (only for cards carrying a real `crisis_id`), gated behind `FORWARD_TASKS=1`
+  (default log-only, so demo runs don't spam the shared DB).
 
 ---
 

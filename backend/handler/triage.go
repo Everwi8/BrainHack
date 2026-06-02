@@ -1,6 +1,7 @@
 // Perrin — triage endpoint: returns the current cross-agency situation
-// assessment (threshold + cascade findings) from lib.RunTriage. Runs against
-// mock data until Sanjey's /api/data/* endpoints are live.
+// assessment (threshold + cascade findings) from lib.RunTriage. The data source
+// (live crises table vs. mock demo data) is chosen at startup by
+// lib.SelectDataProvider.
 package handler
 
 import (

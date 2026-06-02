@@ -7,20 +7,18 @@
 // same spot doesn't spawn near-duplicate cards and the LLM response stays small
 // (the free model is slow on long outputs).
 //
-// Generated cards are meant to land in Sanjey's tasks store via POST /api/tasks.
-// That handler is still a stub, so ForwardTasks is best-effort and log-only
-// until it ships (see TASKS_SINK_URL).
+// Generated cards land in Sanjey's tasks store via lib.DB (the same store behind
+// POST /api/tasks). A task row needs a real crisis_id FK, so ForwardTasks only
+// writes cards that carry one (i.e. findings derived from live crises — cascade
+// findings and mock-data runs have none). Writes are gated behind FORWARD_TASKS=1
+// and default to log-only so repeated demo calls don't spam the shared DB.
 package lib
 
 import (
-	"bytes"
-	"encoding/json"
 	"fmt"
 	"log"
-	"net/http"
 	"os"
 	"strings"
-	"time"
 )
 
 // maxTaskFindings caps how many findings feed task generation, keeping the LLM
@@ -36,7 +34,7 @@ type TaskCard struct {
 	Priority         string `json:"priority"` // high, medium, low
 	VolunteersNeeded int    `json:"volunteers_needed"`
 	CrisisID         string `json:"crisis_id,omitempty"`
-	Type             string `json:"type,omitempty"`     // mirrors the finding type
+	Type             string `json:"type,omitempty"` // mirrors the finding type
 	Location         string `json:"location,omitempty"`
 }
 
@@ -76,9 +74,31 @@ func GenerateTaskCards(report TriageReport) ([]TaskCard, error) {
 		if err != nil {
 			log.Printf("task-gen: LLM path failed (%v), using deterministic fallback", err)
 		}
-		return fallbackTaskCards(findings), nil
+		cards = fallbackTaskCards(findings)
 	}
+	attachFindingMeta(cards, findings)
 	return cards, nil
+}
+
+// attachFindingMeta links each card back to the finding it came from so the
+// card carries the originating crisis_id (and type/location when the LLM dropped
+// them). The task-gen prompt requires exactly one card per finding in order, and
+// the fallback path is 1:1 too, so index alignment is valid only when the counts
+// match — otherwise the model returned something unexpected and we leave the
+// cards untagged rather than mislabel them.
+func attachFindingMeta(cards []TaskCard, findings []TriageFinding) {
+	if len(cards) != len(findings) {
+		return
+	}
+	for i := range cards {
+		cards[i].CrisisID = findings[i].CrisisID
+		if cards[i].Type == "" {
+			cards[i].Type = findings[i].Type
+		}
+		if cards[i].Location == "" {
+			cards[i].Location = findings[i].Location
+		}
+	}
 }
 
 // dedupFindings collapses findings that target the same location, keeping the
@@ -245,31 +265,39 @@ func GenerateTasksFromTriage() ([]TaskCard, error) {
 	return GenerateTaskCards(report)
 }
 
-// ForwardTasks best-effort POSTs each card to the tasks sink so they land in
-// Sanjey's store. The sink (POST /api/tasks) is currently a stub, so failures
-// are logged and swallowed — the caller still has the generated cards to show.
-// Set TASKS_SINK_URL to enable forwarding; unset means log-only.
+// ForwardTasks writes generated cards into the shared tasks store via lib.DB so
+// they show up alongside coordinator-created tasks. Only cards tied to a real
+// crisis row are written (a task needs a valid crisis_id FK); cascade findings
+// and mock-data runs carry none and are skipped. Writes are gated behind
+// FORWARD_TASKS=1 and default to log-only so repeated /api/triage/tasks calls
+// during a demo don't pile duplicate rows into the DB. Errors are logged and
+// swallowed — the caller still has the generated cards to return to the UI.
 func ForwardTasks(cards []TaskCard) {
-	sink := os.Getenv("TASKS_SINK_URL")
-	if sink == "" {
-		log.Printf("task-gen: %d task(s) generated; TASKS_SINK_URL unset, not forwarding (tasks endpoint is a stub)", len(cards))
+	if os.Getenv("FORWARD_TASKS") != "1" {
+		log.Printf("task-gen: %d task(s) generated; FORWARD_TASKS!=1, not writing to tasks store (log-only)", len(cards))
 		return
 	}
-	client := &http.Client{Timeout: 10 * time.Second}
-	for _, t := range cards {
-		payload, err := json.Marshal(t)
-		if err != nil {
-			log.Printf("task-gen: marshal task %q: %v", t.Title, err)
-			continue
-		}
-		resp, err := client.Post(sink, "application/json", bytes.NewReader(payload))
-		if err != nil {
-			log.Printf("task-gen: forward task %q failed: %v", t.Title, err)
-			continue
-		}
-		resp.Body.Close()
-		if resp.StatusCode >= 300 {
-			log.Printf("task-gen: forward task %q got HTTP %d", t.Title, resp.StatusCode)
-		}
+	if DB == nil {
+		log.Printf("task-gen: FORWARD_TASKS=1 but lib.DB is not initialised; skipping writes")
+		return
 	}
+
+	var created, skipped int
+	for _, t := range cards {
+		if t.CrisisID == "" {
+			skipped++ // no real crisis FK — would violate the tasks.crisis_id constraint
+			continue
+		}
+		if _, err := DB.CreateTask(Task{
+			CrisisID:    t.CrisisID,
+			Title:       t.Title,
+			Description: t.Description,
+			Status:      "pending",
+		}); err != nil {
+			log.Printf("task-gen: create task %q for crisis %s: %v", t.Title, t.CrisisID, err)
+			continue
+		}
+		created++
+	}
+	log.Printf("task-gen: wrote %d task(s) to store, skipped %d without a crisis_id", created, skipped)
 }
