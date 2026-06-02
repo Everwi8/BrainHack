@@ -62,12 +62,11 @@ type psiResponse struct {
 		Items []struct {
 			Readings struct {
 				PsiTwentyFourHourly struct {
-					National float64 `json:"national"`
-					North    float64 `json:"north"`
-					South    float64 `json:"south"`
-					East     float64 `json:"east"`
-					West     float64 `json:"west"`
-					Central  float64 `json:"central"`
+					North   float64 `json:"north"`
+					South   float64 `json:"south"`
+					East    float64 `json:"east"`
+					West    float64 `json:"west"`
+					Central float64 `json:"central"`
 				} `json:"psi_twenty_four_hourly"`
 			} `json:"readings"`
 		} `json:"items"`
@@ -76,8 +75,8 @@ type psiResponse struct {
 			LabelLocation struct {
 				Lat float64 `json:"latitude"`
 				Lng float64 `json:"longitude"`
-			} `json:"label_location"`
-		} `json:"region_metadata"`
+			} `json:"labelLocation"`
+		} `json:"regionMetadata"`
 	} `json:"data"`
 }
 
@@ -95,7 +94,7 @@ func fetchPSI() error {
 	}
 
 	readings := resp.Data.Items[0].Readings.PsiTwentyFourHourly
-	national := readings.National
+	national := maxPSI(readings.North, readings.South, readings.East, readings.West, readings.Central)
 
 	// PSI >= 100 = Unhealthy → create/update a haze crisis
 	if national < 100 {
@@ -116,6 +115,16 @@ func fetchPSI() error {
 		Source:       "nea",
 	}
 	return lib.DB.UpsertCrisis(crisis)
+}
+
+func maxPSI(vals ...float64) float64 {
+	m := vals[0]
+	for _, v := range vals[1:] {
+		if v > m {
+			m = v
+		}
+	}
+	return m
 }
 
 func psiSeverity(psi float64) string {

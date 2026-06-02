@@ -73,6 +73,15 @@ func main() {
 		api.GET("/hospitals", handler.GetHospitals)
 		api.GET("/feed", handler.GetFeed)
 
+		// Data endpoints (Sanjey)
+		api.GET("/data/weather", handler.GetWeather)
+		api.GET("/data/haze", handler.GetHaze)
+		api.GET("/data/floods", handler.GetFloods)
+		api.GET("/data/transport", handler.GetTransport)
+		api.GET("/data/dengue", handler.GetDengue)
+		api.GET("/hospitals", handler.GetHospitals)
+		api.GET("/feed", handler.GetFeed)
+
 		// Jerald — map markers
 		api.GET("/map/markers", handler.MapMarkers)
 		api.GET("/shelters", handler.GetShelters)

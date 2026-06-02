@@ -104,10 +104,21 @@ func UpdateTask(c *gin.Context) {
 func DeleteTask(c *gin.Context) {
 	id := c.Param("id")
 
+	task, err := lib.DB.GetTaskByID(id)
+	if err != nil {
+		if err.Error() == "task not found" {
+			c.JSON(http.StatusNotFound, gin.H{"error": "task not found"})
+			return
+		}
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "could not delete task"})
+		return
+	}
+
 	if err := lib.DB.DeleteTask(id); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "could not delete task"})
 		return
 	}
 
+	cache.GlobalCache.Invalidate("crisis:" + task.CrisisID)
 	c.JSON(http.StatusOK, gin.H{"deleted": id})
 }
