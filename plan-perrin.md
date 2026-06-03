@@ -101,3 +101,56 @@ Phase 1 → Phase 2 (photo, self-contained & demos well) → Phase 3 → Phase 4
 - Confirm `/api/chat/photo` contract is acceptable to the team (already listed in API contract table).
 - Triage/task-gen output shapes must match Sanjey's `tasks` schema and crisis-type/severity/status enums (still TBD in "Shared / Cross-Cutting").
 - Voice (`/api/transcribe`) is James's; it forwards transcribed text into `POST /api/chat`, so no extra work on our side beyond keeping `/api/chat` stable.
+
+---
+
+# Remaining Gaps & Improvements (post-completion review)
+
+All five phases above are built and verified. The items below are *additive* —
+found by re-reading the source. None are bugs; each was left open for a concrete
+reason (build sequencing, "verified live" instead of unit-tested, a cross-owner
+schema disagreement, or a conscious MVP punt).
+
+| # | Item | Status / why open | Owner |
+|---|------|-------------------|-------|
+| 1 | **Join the photo pipeline into triage/task cards** | `PhotoObservation` was designed to feed Phase 3/4 but photo (`7ac21b9`) shipped before triage/task-gen existed; the two were never wired. Photos still dead-end at a chat reply. | Perrin (render); +Sanjey/Jerald/James to persist |
+| 2 | Unit tests for `extractJSON` / `stripJSONFences` / `PhotoObservation` parse | Validated end-to-end live instead of unit-tested; the fragile JSON-scraping code has no isolated coverage. | Perrin |
+| 3 | Task-card fields dropped on persist | `plan.md:181` specs `tasks(... priority, volunteers_needed ...)` but `supabase.go:37` `Task` omits them; reconciliation is an unchecked Shared item. Hidden because `ForwardTasks` defaults to log-only. | Sanjey (schema) / Perrin (workaround) |
+| 4 | `sessionStore` TTL eviction (`llm.go:84`) | Deliberate MVP punt ("keep chat history in-memory"); irrelevant for short-lived demo process. | Perrin |
+| 5 | Photo test fixtures (`backend/testdata/photos/`) | The one unchecked Phase 2 box — "tested with a synthetic flood image, not committed". | Perrin |
+
+## #1 — Concrete plan (the only net-new feature still fully ours)
+
+**Constraint:** a photo carries no geolocation and no `crisis_id`, so the
+render-only version is 100% Perrin; anything that *persists* (map marker, saved
+task, volunteer queue) needs a real crisis row → Sanjey's domain.
+
+### Phase A — render-only (100% Perrin, no blockers) ⭐ do first
+- **A1** `backend/lib/photo_triage.go` (new) — `observationToFinding(obs PhotoObservation, caption string) (TriageFinding, bool)`. Severity `high→critical`, `warning→warning`, `none/low→ok=false`; `crisis_type` `none/other→ok=false`. `Location=""`, `Sources=["citizen-report"]`, `CrisisID=""`.
+- **A2** `backend/lib/llm.go` — `VisionLLM` returns `(reply string, obs *PhotoObservation, err error)` (`nil` on the prose-fallback path). One caller to update.
+- **A3** `backend/handler/photo.go` — when the mapped finding is actionable, add `"crisis_card": {type,severity,title,location,detail}` to the response. No extra LLM call.
+- **A4** `frontend/src/pages/Chat.jsx` — in `sendPhoto`, attach `crisisCard: res.crisis_card` to the bot message. JSX already renders it via `InlineCrisisCard` (Chat.jsx:345). Zero new components.
+- **A5** `backend/lib/photo_triage_test.go` (new) — table test for the mapper (also partial cover for #2).
+
+Result: photograph a flood → Brainy replies *and* a severity-coloured crisis
+card renders, driven by the real vision read. Fully demoable, all in our files.
+
+### Phase B — persist / map / volunteer-visible (multi-person)
+| Step | Work | Owner | Blocks |
+|------|------|-------|--------|
+| B1 | Create a `crises` row from a photo report (ingest/create path or `POST /api/crises`), returns real `crisis_id` | **Sanjey** (owns crises table, schema, `main.go`) | all below |
+| B2 | Add `priority`/`volunteers_needed`/`type`/`location` to `tasks` + `Task` (=#3) | **Sanjey** | rich task persistence |
+| B3 | Thread `crisis_id` → `GenerateTaskCards` → `ForwardTasks` (already writes when `FORWARD_TASKS=1` + id present) | **Perrin** | needs B1, B2 |
+| B4 | Photo crisis on map / crisis detail | **Jerald** (already reads `GET /api/crises` — free once persisted) | needs B1 |
+| B5 | Photo task in volunteer queue | **James** (already reads task routes — free once persisted) | needs B1, B3 |
+
+**Sequencing:** ship Phase A now; B1 (Sanjey) is the single unlock for Phase B;
+B3 is small once B1/B2 land; B4/B5 cost Jerald/James nothing beyond confirming
+the new rows render.
+
+### Verification
+- Phase A: `cd backend && go test ./lib/...` passes; in chat, attach a flood
+  image → Brainy reply + `InlineCrisisCard`; attach a nothing-photo → no card.
+- Phase B (after Sanjey's B1/B2): with `FORWARD_TASKS=1`, report a photo crisis
+  → a `crises` row + linked `tasks` row written with priority/volunteers
+  populated; crisis shows on the map, task in the volunteer list.
