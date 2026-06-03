@@ -18,6 +18,7 @@ export default function App() {
         <Route path="/map" element={<Map />} />
         <Route path="/chat" element={<Chat />} />
         <Route path="/crisis" element={<CrisisDetail />} />
+        <Route path="/crises/:id" element={<CrisisDetail />} />
         <Route path="/timeline" element={<Timeline />} />
       </Routes>
     </BrowserRouter>
