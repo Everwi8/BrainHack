@@ -409,12 +409,14 @@ func ExtractPhotoObservation(caption, imageDataURL string) (PhotoObservation, er
 // Brainy's user-facing answer (with full session context and persona). The
 // exchange is recorded in session history so follow-up text chat keeps the
 // photo context. If structured extraction fails, it degrades gracefully to a
-// single direct-vision prose call.
-func VisionLLM(sessionID, caption, imageDataURL string) (string, error) {
-	obs, err := ExtractPhotoObservation(caption, imageDataURL)
-	if err != nil {
-		return visionProseDirect(sessionID, caption, imageDataURL)
+// single direct-vision prose call (obs is nil on that path).
+func VisionLLM(sessionID, caption, imageDataURL string) (reply string, obs *PhotoObservation, err error) {
+	extracted, extractErr := ExtractPhotoObservation(caption, imageDataURL)
+	if extractErr != nil {
+		reply, err = visionProseDirect(sessionID, caption, imageDataURL)
+		return // obs stays nil on the prose-fallback path
 	}
+	obs = &extracted
 
 	// Hand the structured facts to the text model as a user turn. Storing this
 	// in history (rather than the raw image) gives later text turns context.
@@ -437,12 +439,12 @@ func VisionLLM(sessionID, caption, imageDataURL string) (string, error) {
 	b.WriteString("\nRespond to the user about this photo: briefly describe the situation based only on these findings (do not invent details), then give the most important safety actions.")
 
 	appendHistory(sessionID, Message{Role: "user", Content: b.String()})
-	reply, err := chatCompletion(getHistory(sessionID), reasoningOn)
+	reply, err = chatCompletion(getHistory(sessionID), reasoningOn)
 	if err != nil {
-		return "", err
+		return
 	}
 	appendHistory(sessionID, Message{Role: "assistant", Content: reply})
-	return reply, nil
+	return
 }
 
 // visionProseDirect is the fallback single-call path (vision model writes the

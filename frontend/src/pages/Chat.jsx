@@ -188,6 +188,7 @@ export default function Chat() {
       if (res.session_id) setSessionId(res.session_id);
       setMessages(prev => [...prev, {
         id: Date.now(), role: "bot", text: res.reply, timestamp: nowTime(),
+        crisisCard: res.crisis_card ?? undefined,
       }]);
     } catch (err) {
       setMessages(prev => [...prev, {

@@ -58,14 +58,20 @@ func ChatPhoto(c *gin.Context) {
 	}
 	caption := c.PostForm("caption")
 
-	reply, err := lib.VisionLLM(sessionID, caption, dataURL)
+	reply, obs, err := lib.VisionLLM(sessionID, caption, dataURL)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{
+	resp := gin.H{
 		"reply":      reply,
 		"session_id": sessionID,
-	})
+	}
+	if obs != nil {
+		if finding, ok := lib.ObservationToFinding(*obs, caption); ok {
+			resp["crisis_card"] = finding
+		}
+	}
+	c.JSON(http.StatusOK, resp)
 }

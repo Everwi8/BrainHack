@@ -20,7 +20,7 @@ BrainySG is a Progressive Web App (PWA) that acts as Singapore's AI crisis-respo
 The platform does four things:
 
 1. **Unified Data Layer** — Pulls real-time data from NEA (weather, haze, dengue), LTA (transport disruptions), PUB (flood sensors), MOH (hospital beds), and OneMap into one system.
-2. **AI Triage** — Uses an LLM (Gemini Flash) to detect threshold breaches, predict cascading events (e.g. heavy rain → flood → MRT disruption), and auto-generate actionable task cards.
+2. **AI Triage** — Uses an LLM (Nemotron via OpenRouter) to detect threshold breaches, predict cascading events (e.g. heavy rain → flood → MRT disruption), and auto-generate actionable task cards.
 3. **Live Crisis Map** — OneMap-based map showing active crises as red dots, shelters with capacity, and hospitals with bed availability.
 4. **Volunteer Coordination** — AI matches volunteers to tasks by skill, distance, and availability. Volunteers join crisis-specific group chats with real-time updates from Brainy and coordinators.
 
@@ -33,12 +33,12 @@ The platform does four things:
 ### Tech Stack
 
 - **Frontend:** React 18+ with Vite, TailwindCSS, React Router, PWA (service worker + manifest)
-- **Backend:** Go with Gin framework, organized under `backend/` with `handlers/`, `middleware/`, `models/`, `services/` folders
-- **Database:** PostgreSQL (using pgx or GORM)
-- **AI:** gpt-oss-120b via OpenAI-compatible API (`backend/lib/llm.go`) for chatbot, triage reasoning, photo interpretation, and task generation
-- **Maps:** OneMap API (Singapore's national basemap, built on Leaflet)
-- **Real-time:** gorilla/websocket for volunteer group chat
-- **Speech-to-text:** Google STT or Whisper API for voice transcription
+- **Backend:** Go with Gin framework, organized under `backend/` with `handler/`, `middleware/`, `lib/`, `ingestion/`, `cache/`
+- **Database:** Supabase (PostgreSQL via PostgREST) — `lib/supabase.go`
+- **AI:** `nvidia/nemotron-3-super-120b-a12b:free` (text) + `nvidia/nemotron-nano-12b-v2-vl:free` (vision) via OpenRouter for chatbot, triage, photo interpretation, and task generation
+- **Maps:** OneMap API (Singapore's national basemap, Leaflet)
+- **Real-time:** gorilla/websocket (planned for volunteer group chat)
+- **Speech-to-text:** Google STT or Whisper API (planned)
 - **Data Sources:** NEA, LTA DataMall, PUB MyWaters, MOH, data.gov.sg (all free/open APIs)
 - **Notifications:** Notify SG (stub for MVP)
 
@@ -65,11 +65,11 @@ The platform does four things:
 
 - Frontend and backend are separate projects in the same repo (`/frontend` and `/backend`)
 - Frontend dev server runs on Vite, proxies API calls to Go backend
-- All government data is polled by the backend at 5-minute intervals and cached (go-cache or Redis)
+- All government data is polled by the backend at 5-minute intervals and cached (`cache/cache.go` with stale-on-error fallback)
 - If a government API fails, backend serves last-known-good cached data (graceful degradation)
-- Triage logic is rule-based cascade chains (not ML) — hardcoded relationships fed into Gemini prompts as context
+- Triage logic is rule-based cascade chains (not ML) — hardcoded relationships fed into Nemotron prompts as context
 - Hospital bed data is annual/static from MOH — displayed as "last reported" or simulated for demo
-- Auth is simple JWT for MVP (no Singpass integration yet)
+- Auth is JWT for MVP (no Singpass integration yet)
 - PWA installable on any device — no app store required
 
 ---
@@ -142,7 +142,7 @@ The platform does four things:
   - [x] Center feed: crisis event cards with tag badges (URGENT ALERT / LIVE / TRENDING / COMMUNITY), timestamp, title, location, body, comment/share counts, action button
   - [x] Right panel: "What's happening" trending box with 3 trending items + "Show more"
   - [x] Right panel: Emergency Help dark card (Police 999, Ambulance/SCDF 995, Haze Hotline)
-  - [ ] Replace hardcoded MOCK_FEED with live data from `GET /api/feed` once Sanjey ships it
+  - [ ] Replace hardcoded `MOCK_FEED` in `Timeline.jsx` with live data from `GET /api/feed` (backend endpoint is live — just needs frontend wiring)
 
 ### Backend
 
@@ -166,19 +166,19 @@ The platform does four things:
 ### Backend — Project Setup
 
 - [x] Go project init (`go mod init`) with Gin framework
-- [x] Project structure: `handlers/`, `middleware/` (models/, services/, config/ not yet created)
-- [x] Environment config (`.env` or config file for API keys, DB connection, ports)
-- [x] CORS middleware for frontend dev server
+- [x] Project structure: `handler/`, `middleware/`, `lib/`, `ingestion/`, `cache/`
+- [x] Environment config (`.env` + `godotenv` for API keys, DB connection, ports)
+- [x] CORS middleware (`middleware/cors.go` — reads `CORS_ORIGIN` env, defaults to localhost:5173)
 - [ ] Error handling middleware
 - [ ] Request logging middleware (Gin logger or custom)
 - [ ] API rate limiting middleware
 
 ### Backend — Database
 
-- [ ] PostgreSQL connection setup (pgx or GORM)
-- [ ] Schema: `users` (id, name, email, password_hash, location, role, created_at)
-- [ ] Schema: `crises` (id, type, title, description, severity, status, lat, lng, address, source, created_at, updated_at)
-- [ ] Schema: `tasks` (id, crisis_id, title, description, status, priority, volunteers_needed, created_at)
+- [x] DB connection — Supabase PostgREST client at `lib/supabase.go` (replaces pgx/GORM; full CRUD for crises, tasks, users)
+- [x] Schema: `users` (auth login/register live; bcrypt + JWT in use)
+- [x] Schema: `crises` (core table; ingestion goroutines populate it; severity uses `low/medium/high/critical`)
+- [x] Schema: `tasks` (CRUD live; note: `priority` and `volunteers_needed` columns not yet confirmed in DB — gap #3 in `plan-perrin.md`)
 - [ ] Schema: `volunteers` (id, user_id, skills, availability, lat, lng)
 - [ ] Schema: `reports` (id, user_id, crisis_id, type, content, photo_url, lat, lng, created_at)
 - [ ] Migration scripts
@@ -186,42 +186,37 @@ The platform does four things:
 
 ### Backend — Auth
 
-- [ ] JWT-based auth middleware
-- [ ] Login / register endpoints
-- [ ] Protect relevant routes
+- [x] JWT-based auth middleware (`middleware/auth.go` — validates Bearer tokens, extracts userID/email into Gin context)
+- [x] Login / register endpoints (`handler/auth.go` — bcrypt hashing, 72-hour JWT issuance)
+- [x] Protect relevant routes (tasks CRUD routes require auth in `main.go`)
 
 ### Backend — Data Ingestion
 
-- [ ] NEA Weather API (real-time weather forecasts, heavy rain warnings)
-- [ ] NEA PSI / PM2.5 API (haze readings)
-- [ ] NEA Dengue clusters API
-- [ ] PUB MyWaters API (flood sensor water levels)
-- [ ] LTA DataMall API (MRT/bus disruptions)
-- [ ] MOH data (hospital bed counts — static/annual, seeded into DB)
-- [ ] 5-minute polling interval with go-cache or Redis
-- [ ] Graceful degradation: serve last-known-good data if API fails
-- [ ] Cross-check logic (e.g. NEA rain + PUB water level = flood confidence)
+- [x] NEA Weather API — `ingestion/nea.go` (2-hour forecasts + PSI; 5-min poll; upserts crisis rows on threshold breach)
+- [x] NEA PSI / PM2.5 API — included in `ingestion/nea.go`
+- [ ] NEA Dengue clusters API — no dedicated ingestion goroutine; `GET /api/data/dengue` returns DB rows but nothing currently writes them
+- [x] PUB MyWaters API — `ingestion/pub.go` (water-level stations; creates flood crises when level > 2.5 m)
+- [x] LTA DataMall API — `ingestion/lta.go` (train alerts; requires `LTA_API_KEY` env var; skips gracefully if key absent)
+- [x] MOH data — `handler/hospitals.go` (hardcoded 2025 MOH bed counts for 10 public hospitals; `ingestion/moh.go` is a no-op by design — no real-time MOH API available)
+- [x] 5-minute polling — all ingestion goroutines use a `time.Ticker` started in `main.go`
+- [x] Graceful degradation — `cache/cache.go` `GetOrFetch` serves stale data on fetch error
+- [x] Cross-check logic — cascade rules in `lib/triage.go` (rain + high water level → flash flood, flood near MRT → transport disruption, haze + dengue cluster → compound health risk)
 
 ### Backend — API Routes
 
-- [x] `GET /api/crises` — list all active crises, filterable by type/status (route registered, handler stub)
-- [x] `GET /api/crises/:id` — single crisis detail (route registered, handler stub)
-- [ ] `GET /api/crises/nearby?lat=&lng=&radius=` — crises within radius
-- [x] `GET /api/tasks` — list tasks, filterable by crisis_id/status (route registered, handler stub)
-- [x] `POST /api/tasks` — create task (coordinator only) (route registered, handler stub)
-- [x] `PATCH /api/tasks/:id` — update task status (route registered as PUT, handler stub)
-- [ ] `GET /api/hospitals` — hospital list with bed counts and BOR
-- [ ] `GET /api/data/weather` — latest weather data
-- [ ] `GET /api/data/floods` — latest flood sensor readings
-- [ ] `GET /api/data/haze` — latest PSI/PM2.5
-- [ ] `GET /api/data/dengue` — dengue cluster locations
-- [ ] `GET /api/data/transport` — MRT disruption status
-- [ ] **`GET /api/feed`** — **Timeline/Feed endpoint** (assigned to **Sanjey**)
-  - Returns merged, time-sorted list of crisis events for the Feed page
-  - Each item includes: `id`, `tag` (URGENT_ALERT | LIVE | TRENDING | COMMUNITY), `title`, `location`, `body`, `image_url`, `created_at`, `comment_count`, `share_count`, `help_needed`
-  - Query params: `?limit=20&offset=0` for pagination
-  - Sources: aggregate from `crises` table + ingested data events (weather, haze, transport)
-  - Sort: most recent first; URGENT_ALERT items always pinned to top within their time window
+- [x] `GET /api/crises` — fully implemented (`handler/crises.go`; cached, proximity filter, Haversine distance)
+- [x] `GET /api/crises/:id` — fully implemented (`handler/crises.go`)
+- [ ] `GET /api/crises/nearby?lat=&lng=&radius=` — not yet built (list endpoint does proximity filtering but no dedicated nearby route)
+- [x] `GET /api/tasks` — fully implemented with CRUD + auth (`handler/tasks.go`)
+- [x] `POST /api/tasks` — fully implemented (coordinator auth required)
+- [x] `PATCH /api/tasks/:id` — fully implemented; `DELETE /api/tasks/:id` also registered
+- [x] `GET /api/hospitals` — fully implemented; 10 public hospitals with 2025 MOH bed counts (`handler/hospitals.go`)
+- [x] `GET /api/data/weather` — fully implemented (`handler/data.go`; served from ingestion cache)
+- [x] `GET /api/data/floods` — fully implemented (`handler/data.go`)
+- [x] `GET /api/data/haze` — fully implemented, includes PSI advisory level logic (`handler/data.go`)
+- [x] `GET /api/data/dengue` — handler implemented (`handler/data.go`); no ingestion goroutine yet — returns DB rows when seeded
+- [x] `GET /api/data/transport` — fully implemented (`handler/data.go`)
+- [x] **`GET /api/feed`** — fully implemented (`handler/feed.go`; derives feed items from crises table, pins URGENT_ALERT by severity, supports `?limit=&offset=` pagination); frontend not yet wired to it
 
 ---
 
@@ -244,6 +239,7 @@ The platform does four things:
   - [x] Photo preview before sending
   - [x] Upload with loading indicator
   - [x] AI response with situation analysis
+  - [x] Inline crisis card rendered when photo shows an actionable crisis (`res.crisis_card` → `InlineCrisisCard`)
 - [x] **Inline Rich Cards in Chat**
   - [x] Shelter card (name, distance, "View Map" link) — like the Pasir Ris Community Club card
   - [x] Hospital card (name, bed availability) — `InlineHospitalCard.jsx` (bed fraction + availability bar)
@@ -255,41 +251,54 @@ The platform does four things:
 
 ### Backend
 
-- [x] **LLM API Integration (gpt-oss-120b)**
-  - [x] API client wrapper at `backend/lib/llm.go` (OpenAI-compatible, model: `gpt-oss-120b`)
+- [x] **LLM API Integration**
+  - [x] API client wrapper at `backend/lib/llm.go` (OpenAI-compatible; text model: `nvidia/nemotron-3-super-120b-a12b:free` via OpenRouter)
   - [x] System prompt design for crisis chatbot persona (Brainy)
-  - [x] Conversation context management (in-memory history per session, capped at 20 turns)
+  - [x] Conversation context management (in-memory history per session via `sessionStore sync.Map`, capped at 20 turns)
   - [x] `POST /api/chat` handler wired up (`backend/handler/chat.go`)
   - [x] Error handling for API failures
   - [x] Structured JSON output parsing for task cards (`ChatJSON` helper in `llm.go`)
   - [x] Retry logic for transient API failures (3 attempts, exponential backoff on 429/5xx/network)
-- [x] **Triage Logic** (`backend/lib/triage.go`, against mock data via `DataProvider`)
+  - [x] Reasoning disabled for JSON calls; enabled for prose answers (`reasoningParam` per-call)
+- [x] **Triage Logic** (`backend/lib/triage.go`, `triage_live.go`, `triage_mock.go`)
   - [x] Threshold rules: water level ≥ 75% → flood warning (≥ 90% critical)
   - [x] Threshold rules: PSI ≥ 100 → haze advisory (≥ 200 critical)
   - [x] Threshold rules: dengue cases ≥ 10 in cluster → health alert (≥ 50 critical)
   - [x] Cascade rules: heavy rain + high water (same area) → flash-flood risk
   - [x] Cascade rules: flood within 1.5 km of MRT → transport disruption
   - [x] Cascade rules: high PSI + dengue cluster → compound health risk
-  - [x] Feed triage findings into Brainy's prompt context (live situational-awareness system message on session start); swaps to Sanjey's endpoints via `SetDataProvider` when live
+  - [x] Feed triage findings into Brainy's prompt context (live situational-awareness system message on session start)
+  - [x] `CrisisDataProvider` adapts live Supabase crisis rows to `DataProvider` readings (`triage_live.go`); auto-selected when `SUPABASE_URL` is set via `SelectDataProvider`
   - [x] `GET /api/triage` endpoint exposes the sorted report
 - [x] **Auto Task Card Generation** (`backend/lib/taskgen.go`)
   - [x] AI generates structured task card JSON from triage output (via `ChatJSON`); deterministic fallback if the LLM call fails
-  - [x] POST generated tasks to Sanjey's `/api/tasks` endpoint — `ForwardTasks` best-effort (log-only while the handler is a stub)
+  - [x] `ForwardTasks` best-effort POSTs to `TASKS_SINK_URL`; log-only unless `FORWARD_TASKS=1`
   - [x] Task fields: title, description, priority, volunteers_needed, crisis_id (+ type, location)
   - [x] `GET /api/triage/tasks` endpoint exposes the generated cards
-- [x] **Photo Interpretation**
-  - [x] Accept image upload via `POST /api/chat/photo` (multipart, 8 MB cap, content-type sniffed)
-  - [x] Send image to vision model — `nvidia/nemotron-nano-12b-v2-vl:free` (OpenRouter), not Gemini Flash; base64 data URL via `VisionLLM`
-  - [x] Return situation description + recommended actions; photo trace added to session history so text follow-ups keep context
+- [x] **Photo Interpretation** (`backend/handler/photo.go`, `backend/lib/llm.go`, `backend/lib/photo_triage.go`)
+  - [x] Accept image upload via `POST /api/chat/photo` (multipart, 8 MB cap, content-type sniffed from bytes)
+  - [x] `VisionLLM` sends image to `nvidia/nemotron-nano-12b-v2-vl:free`; returns `(reply string, obs *PhotoObservation, err error)`; `obs` is nil on prose-fallback path
+  - [x] Hybrid pipeline: VL model extracts structured `PhotoObservation` → 120B text model writes Brainy's reply using the facts; degrades to single-call prose if JSON parse fails
+  - [x] Photo trace added to session history so text follow-ups keep photo context
+  - [x] `ObservationToFinding` (`lib/photo_triage.go`) maps a `PhotoObservation` to a `TriageFinding`; skips low/none severity and none/other crisis types
+  - [x] `POST /api/chat/photo` response includes `crisis_card` when observation is actionable (no extra LLM call)
 - [x] **Chat Endpoints**
   - [x] `POST /api/chat` — send text message, return AI response (fully implemented)
-  - [x] `POST /api/chat/photo` — send image, return AI analysis
-- [ ] Chat history storage (in-memory for MVP, or DB)
+  - [x] `POST /api/chat/photo` — send image, return AI analysis + optional `crisis_card`
+- [x] Chat history storage — in-memory per session (`sessionStore sync.Map`, capped at 20 turns); DB persistence not needed for demo
+
+### Tests
+
+- [x] `lib/triage_test.go` — mock data trips all threshold + cascade rules
+- [x] `lib/triage_live_test.go` — live provider mapping and helpers
+- [x] `lib/taskgen_test.go` — fallback cards, sanitise, dedup, empty-findings
+- [x] `lib/photo_triage_test.go` — 11-case `ObservationToFinding` table test (covers severity mapping, type filtering, hazard appending, source tagging)
+- [x] `extractJSON` (6 cases) + `stripJSONFences` (5 cases) in `photo_triage_test.go`
 
 ### Mock Data Needed
 
 - [x] Sample crisis data to inject into prompts for testing (without Sanjey's endpoints)
-- [ ] Sample photos of flood/fire/haze scenarios for testing vision
+- [ ] Sample photos of flood/fire/haze scenarios committed as test fixtures (`backend/testdata/photos/`)
 
 ---
 
@@ -297,44 +306,40 @@ The platform does four things:
 
 ### Frontend
 
-- [ ] **Map Page**
-  - [ ] OneMap embed/integration (using onemap-leaflet or Leaflet with OneMap tiles)
-  - [ ] Red dot markers for active crises (sized/colored by severity)
-  - [ ] Green markers for shelters (with capacity label)
-  - [ ] Blue markers for hospitals (with bed count label)
-  - [ ] User location marker ("You are here")
-  - [ ] Marker clustering if too many points
-  - [ ] Map filter/overlay toggles (show/hide: crises, shelters, hospitals)
-  - [ ] Click marker → popup summary → link to crisis detail
-- [ ] **Crisis Detail Page**
-  - [ ] AI-generated situation summary (from Perrin's triage)
-  - [ ] Crisis metadata (type, severity, location, last updated)
-  - [ ] Water level / sensor reading display (if flood)
-  - [ ] Task card list with status badges (Pending / In Progress / Resolved)
-  - [ ] Volunteer count ("12 helpers")
-  - [ ] "I Want to Help" confirmation button → triggers James's volunteer flow
-  - [ ] Link to group chat for this crisis
+- [x] **Map Page** (`pages/Map.jsx`, `components/map/MapView.jsx`)
+  - [x] OneMap embed via Leaflet with OneMap tile layer
+  - [x] Red dot markers for active crises — `CrisisMarker.jsx` (severity-coloured: critical=red, warning=amber, low=yellow)
+  - [x] Green markers for shelters (with capacity label)
+  - [x] Blue markers for hospitals (with bed count label)
+  - [x] User location marker ("You are here") via browser Geolocation API
+  - [x] Marker clustering — `MarkerClusterGroup`
+  - [x] Map filter/overlay toggles (show/hide: crises, shelters, hospitals)
+  - [x] Click marker → navigate to `/crises/:id`
+- [x] **Crisis Detail Page** (`pages/CrisisDetail.jsx`)
+  - [x] AI-generated situation summary (Brainy brief driven by triage findings)
+  - [x] Crisis metadata (type, severity, location, last updated)
+  - [x] Water level / sensor reading display (if flood)
+  - [x] Task card list with status badges (Pending / In Progress / Resolved)
+  - [x] Volunteer count ("12 helpers")
+  - [x] "I Want to Help" button → links to James's volunteer flow
+  - [x] Link to group chat for this crisis
 - [x] **Map on Home Page**
   - [x] "View SG Map" button links to full map page
 
 ### Backend
 
 - [ ] **Geospatial Queries**
-  - [ ] `GET /api/crises/nearby?lat=&lng=&radius=` — crises within radius (Haversine or PostGIS)
-  - [x] `GET /api/shelters?lat=&lng=` — returns shelters sorted by Haversine distance (fully implemented in `handler/map.go`)
-- [ ] **Shelter Data**
-  - [ ] Parse shelter locations from OneMap / data.gov.sg
-  - [ ] Store in DB with coordinates and capacity (currently hardcoded — 10 community centres with lat/lng/capacity in handler)
-- [x] **Map Marker Endpoint**
-  - [x] `GET /api/map/markers?types=crises,shelters,hospitals` — route registered; returns `{"markers": []}` (stub, no real data yet)
-- [ ] **Crisis Detail Endpoint**
-  - [ ] `GET /api/crises/:id` — aggregates crisis data from Sanjey's DB + triage summary from Perrin + task list
+  - [ ] `GET /api/crises/nearby?lat=&lng=&radius=` — not yet built (crises list does proximity filtering but no dedicated nearby route)
+  - [x] `GET /api/shelters?lat=&lng=` — returns shelters sorted by Haversine distance (`handler/map.go`)
+- [x] **Shelter Data** — 10 Singapore community centres hardcoded with lat/lng/capacity in `handler/map.go` (sufficient for demo)
+- [ ] **Map Marker Endpoint** — `GET /api/map/markers` registered but returns `{"markers": []}` (stub); map page reads crises/shelters/hospitals via their own endpoints directly
+- [x] **Crisis Detail Endpoint** — `GET /api/crises/:id` fully implemented (`handler/crises.go`)
 
 ### Mock Data Needed
 
-- [ ] 5-10 crisis markers across Singapore (various types and severities)
+- [x] 5-10 crisis markers — 5 mock crises in `src/lib/mockData.js`; real crises populated in Supabase via ingestion goroutines
 - [x] 10 shelter locations with coordinates and capacity (hardcoded in `handler/map.go`)
-- [ ] 8 public hospital locations with bed counts
+- [x] 10 public hospital locations with bed counts — `handler/hospitals.go` (2025 MOH data)
 
 ---
 
@@ -342,7 +347,7 @@ The platform does four things:
 
 ### Frontend
 
-- [ ] **Volunteer Group Chat Page**
+- [ ] **Volunteer Group Chat Page** (`pages/Volunteers.jsx` — currently just Navbar + heading)
   - [ ] Tab bar for chat rooms (Brainy general / Flash Flood / Fire — one per crisis)
   - [ ] Crisis header with summary (e.g. "Flash Flood - Pasir Ris Dr 3 · Water 76% · 12 helpers · 3 Open Tasks")
   - [ ] Message list with different message types:
@@ -352,16 +357,16 @@ The platform does four things:
   - [ ] Message input bar with text field + send button
   - [ ] Voice record button (microphone icon)
   - [ ] Camera and attachment buttons
-- [ ] **Voice Recording UI**
+- [ ] **Voice Recording UI** (`components/volunteer/VoiceRecorder.jsx` — stub, returns null)
   - [ ] Tap mic → recording indicator (waveform or timer)
   - [ ] Stop → "Transcribing..." indicator
   - [ ] Transcribed text appears in chat input or sent directly
-- [ ] **"I Want to Help" Registration Flow**
+- [ ] **"I Want to Help" Registration Flow** (`components/volunteer/VolunteerForm.jsx` — stub, returns null)
   - [ ] Triggered from Jerald's crisis detail page
   - [ ] Skill input (checkboxes: has car, medical training, heavy lifting, etc.)
   - [ ] Availability toggle
   - [ ] Confirmation → added to crisis volunteer pool
-- [ ] **Task Status Tracker**
+- [ ] **Task Status Tracker** (`components/volunteer/TaskTracker.jsx` — stub, returns null)
   - [ ] Task card with status badge (Pending → Assigned → In Progress → Resolved)
   - [ ] Volunteer can update status on assigned tasks
 
@@ -372,9 +377,9 @@ The platform does four things:
   - [ ] Integration with Google STT or Whisper API
   - [ ] Return transcribed text
   - [ ] Forward transcribed text to Perrin's `POST /api/chat` as standard message
-- [x] **Volunteer System**
-  - [x] `POST /api/volunteers` — register with skills, location, availability (route registered, handler stub)
-  - [x] `GET /api/volunteers?crisis_id=` — list volunteers for a crisis (route registered, handler stub)
+- [x] **Volunteer System** (routes registered; handlers are no-ops)
+  - [x] `POST /api/volunteers` — route registered (`handler/volunteers.go` stub)
+  - [x] `GET /api/volunteers?crisis_id=` — route registered (stub)
   - [ ] `POST /api/volunteers/match` — AI/logic-based matching (skill + distance + availability scoring)
   - [ ] `PATCH /api/volunteers/:id` — update availability
 - [ ] **Group Chat**
@@ -402,10 +407,10 @@ The platform does four things:
 
 ## Shared / Cross-Cutting
 
-- [ ] Agree on API response JSON shapes (30-min team meeting)
-- [ ] Agree on crisis type enum (flood, fire, haze, dengue, transport, pandemic)
-- [ ] Agree on severity enum (low, warning, critical)
-- [ ] Agree on task status enum (pending, assigned, in_progress, resolved)
+- [x] Crisis type enum — `flood, fire, haze, fallen_tree, road_accident, building_damage, medical, crowd, transport, dengue, cascade` (agreed in code; consistent across `PhotoObservation`, `TriageFinding`, `InlineCrisisCard`)
+- [x] Severity enum — `low, warning, critical` (constants in `lib/triage.go`; used consistently across backend and frontend)
+- [ ] Task status enum — `pending, assigned, in_progress, resolved` (used in code but not formally agreed across all owners)
+- [ ] Agree on full API response JSON shapes (some endpoints evolved from the original contract table)
 - [x] Brainy mascot image asset (PNG/SVG) available to all
 - [ ] BrainySG logo asset
 - [ ] Color palette tokens (from Figma or agreed on)
@@ -419,20 +424,21 @@ The platform does four things:
 
 | Source | API | What It Provides | Update Freq | Free? |
 |---|---|---|---|---|
-| NEA | data.gov.sg | Weather, PSI, PM2.5, dengue clusters | 5min-1hr | Yes |
+| NEA | data.gov.sg | Weather forecasts, PSI, PM2.5 | 5min–1hr | Yes |
 | PUB | data.gov.sg / MyWaters | Flood sensor water levels | ~5min | Yes |
 | LTA | LTA DataMall | MRT/bus disruptions, traffic | ~5min | Yes (API key) |
 | MOH | data.gov.sg | Hospital bed counts, BOR | Annual | Yes |
 | OneMap | onemap.gov.sg | Basemap, geocoding, routing | Live | Yes |
 | Notify SG | GovTech | Push notifications to citizens | Live | Yes |
-| gpt-oss-120b | ZAI API (`csk-` key) | LLM for chatbot + triage | Per request | Provisioned |
+| OpenRouter | openrouter.ai | Nemotron 120B (text) + Nemotron 12B VL (vision) | Per request | Free tier |
 
 ---
 
 ## Notes
 
-- Hospital bed data is **annual/static**, not live. Display as "last reported" or simulate for demo.
-- All frontend work can proceed with mock data before Sanjey's endpoints are ready.
-- Perrin's AI work is independently testable against the OpenRouter/Nemotron API (text: `nvidia/nemotron-3-super-120b-a12b:free`; vision: `nvidia/nemotron-nano-12b-v2-vl:free`). Gemini Flash is no longer used. See `plan-perrin.md` for the per-endpoint model breakdown and rationale.
-- Update the pitch deck: Flask → Go + Gin, Gemini Flash → gpt-oss-120b (or say "LLM API").
-- LLM base URL is configurable via `LLM_BASE_URL` env var (default: `https://api.zai.com/v1`). Confirm with API provider if endpoint differs.
+- Hospital bed data is **annual/static**, not live. Displayed as "last reported" values from `handler/hospitals.go` (2025 MOH figures for 10 public hospitals).
+- All frontend work can proceed with mock data before API endpoints are fully wired; `src/lib/mockData.js` provides seed data for the map, crisis detail, and timeline pages.
+- **LLM setup:** text model is `nvidia/nemotron-3-super-120b-a12b:free`, vision model is `nvidia/nemotron-nano-12b-v2-vl:free`, both via OpenRouter (`LLM_BASE_URL=https://openrouter.ai/api/v1`). Gemini Flash is no longer used. See `plan-perrin.md` for model rationale and the two-quota-bucket strategy.
+- **NEA dengue gap:** the only ingestion path not implemented — `GET /api/data/dengue` handler exists but no goroutine writes dengue rows. Low priority for demo since triage mock data covers dengue scenarios.
+- **Timeline live data:** `GET /api/feed` is implemented in `handler/feed.go` but `Timeline.jsx` still reads from `MOCK_FEED`. One-line fix to wire them up.
+- Update the pitch deck: Flask → Go + Gin, Gemini Flash → Nemotron via OpenRouter.
