@@ -276,18 +276,9 @@ export default function Chat() {
     }}>
       <Navbar />
 
-      <div style={{
-        flex: 1, overflow: "hidden",
-        display: "flex", gap: 24,
-        padding: "0 40px",
-        maxWidth: 1200, margin: "0 auto", width: "100%", boxSizing: "border-box",
-      }}>
+      <div className="chat-layout">
         {/* ── Left panel ── */}
-        <div style={{
-          width: 264, flexShrink: 0,
-          display: "flex", flexDirection: "column", alignItems: "center",
-          padding: "24px 0 20px", gap: 16,
-        }}>
+        <div className="chat-left-panel">
           <BrainyMascot mood={isTyping ? "normal" : "happy"} width={240} />
           <div style={{
             background: "#fff", borderRadius: 20, padding: "18px 20px",

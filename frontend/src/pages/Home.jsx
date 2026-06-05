@@ -47,22 +47,13 @@ export default function Home() {
       )}
 
       {/* Main 3-col grid */}
-      <div style={{
-        display: "grid",
-        gridTemplateColumns: "320px 1fr 290px",
-        gap: 24,
-        width: "100%",
-        maxWidth: 1280,
-        margin: "24px auto",
-        padding: "0 32px",
-        boxSizing: "border-box",
-      }}>
+      <div className="home-grid">
 
         {/* LEFT */}
         <CrisisCard />
 
         {/* CENTER: Brainy mascot */}
-        <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 16, paddingTop: 50 }}>
+        <div className="home-grid-center" style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 16, paddingTop: 50 }}>
           <div style={{
             background: "#fff",
             borderRadius: 20,

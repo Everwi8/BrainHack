@@ -179,18 +179,10 @@ export default function Timeline() {
   return (
     <div style={{ minHeight: "100vh", background: "#F5F0E8", fontFamily: "'Nunito', sans-serif" }}>
       <Navbar />
-      <div style={{
-        maxWidth: 1100,
-        margin: "0 auto",
-        padding: "32px 24px",
-        display: "grid",
-        gridTemplateColumns: "220px 1fr 260px",
-        gap: 24,
-        alignItems: "start",
-      }}>
+      <div className="timeline-grid">
 
         {/* Left panel */}
-        <div>
+        <div className="timeline-left">
           <div style={{
             background: "#fff",
             borderRadius: 16,
@@ -237,7 +229,7 @@ export default function Timeline() {
         </div>
 
         {/* Right panel */}
-        <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+        <div className="timeline-right">
           {/* What's happening */}
           <div style={{
             background: "#fff", borderRadius: 16,

@@ -1,0 +1,303 @@
+/* ════════════════════════════════════════════════════════════════
+   responsive.css — mobile-first layout overrides
+   Breakpoints: ≤640px mobile, ≤1024px tablet, >1024px desktop
+════════════════════════════════════════════════════════════════ */
+
+/* ── NavBar ──────────────────────────────────────────────────── */
+
+.navbar {
+  background: #fff;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 40px;
+  height: 64px;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.07);
+  position: sticky;
+  top: 0;
+  z-index: 100;
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.navbar-links {
+  display: flex;
+  gap: 36px;
+}
+
+.navbar-right {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.navbar-hamburger {
+  display: none;
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: 6px;
+  border-radius: 8px;
+  align-items: center;
+  justify-content: center;
+  color: #1a1a2e;
+}
+
+.navbar-mobile-menu {
+  display: none;
+  flex-direction: column;
+  position: fixed;
+  top: 64px;
+  left: 0;
+  right: 0;
+  background: #fff;
+  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.12);
+  z-index: 99;
+  border-top: 1px solid #f0f0f0;
+}
+
+.navbar-mobile-menu.open {
+  display: flex;
+}
+
+.navbar-mobile-menu button {
+  padding: 16px 24px;
+  text-align: left;
+  border: none;
+  border-bottom: 1px solid #f5f5f5;
+  background: none;
+  cursor: pointer;
+  font-family: 'Nunito', sans-serif;
+  font-size: 16px;
+  font-weight: 600;
+  color: #1a1a2e;
+  transition: background 0.1s;
+}
+
+.navbar-mobile-menu button:hover {
+  background: #FEF3C7;
+}
+
+.navbar-mobile-menu button.active {
+  background: #FEF3C7;
+  color: #92400E;
+  font-weight: 700;
+  border-left: 3px solid #F59E0B;
+}
+
+@media (max-width: 768px) {
+  .navbar {
+    padding: 0 16px;
+  }
+  .navbar-links {
+    display: none;
+  }
+  .navbar-hamburger {
+    display: flex;
+  }
+}
+
+/* ── Home ────────────────────────────────────────────────────── */
+
+.home-grid {
+  display: grid;
+  grid-template-columns: 320px 1fr 290px;
+  gap: 24px;
+  width: 100%;
+  max-width: 1280px;
+  margin: 24px auto;
+  padding: 0 32px;
+  box-sizing: border-box;
+}
+
+/* Tablet: CrisisCard + BrainyPanel side by side, Brainy below */
+@media (max-width: 1100px) {
+  .home-grid {
+    grid-template-columns: 1fr 1fr;
+    padding: 0 20px;
+    gap: 20px;
+  }
+  .home-grid-center {
+    order: 3;
+    grid-column: 1 / -1;
+  }
+}
+
+/* Mobile: single column */
+@media (max-width: 640px) {
+  .home-grid {
+    grid-template-columns: 1fr;
+    padding: 0 12px;
+    gap: 14px;
+    margin: 14px auto;
+  }
+  .home-grid-center {
+    order: 0;
+    grid-column: auto;
+  }
+}
+
+/* ── Timeline ────────────────────────────────────────────────── */
+
+.timeline-grid {
+  max-width: 1100px;
+  margin: 0 auto;
+  padding: 32px 24px;
+  display: grid;
+  grid-template-columns: 220px 1fr 260px;
+  gap: 24px;
+  align-items: start;
+}
+
+.timeline-right {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+/* Tablet: hide left panel, show feed + right */
+@media (max-width: 1024px) {
+  .timeline-grid {
+    grid-template-columns: 1fr 240px;
+    padding: 20px 16px;
+    gap: 20px;
+  }
+  .timeline-left {
+    display: none;
+  }
+}
+
+/* Mobile: feed only */
+@media (max-width: 640px) {
+  .timeline-grid {
+    grid-template-columns: 1fr;
+    padding: 12px;
+    gap: 12px;
+  }
+  .timeline-left {
+    display: none;
+  }
+  .timeline-right {
+    display: none;
+  }
+}
+
+/* ── Chat ────────────────────────────────────────────────────── */
+
+.chat-layout {
+  flex: 1;
+  overflow: hidden;
+  display: flex;
+  gap: 24px;
+  padding: 0 40px;
+  max-width: 1200px;
+  margin: 0 auto;
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.chat-left-panel {
+  width: 264px;
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 24px 0 20px;
+  gap: 16px;
+}
+
+@media (max-width: 900px) {
+  .chat-layout {
+    padding: 0 20px;
+  }
+  .chat-left-panel {
+    width: 200px;
+  }
+}
+
+@media (max-width: 640px) {
+  .chat-layout {
+    padding: 0 10px;
+  }
+  .chat-left-panel {
+    display: none;
+  }
+}
+
+/* ── Map ─────────────────────────────────────────────────────── */
+
+.map-body {
+  display: flex;
+  gap: 16px;
+  padding: 0 24px 28px;
+  align-items: flex-start;
+}
+
+.map-sidebar {
+  width: 210px;
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.map-brainy {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+}
+
+@media (max-width: 768px) {
+  .map-body {
+    flex-direction: column;
+    padding: 0 12px 20px;
+  }
+  .map-sidebar {
+    width: 100%;
+    flex-direction: row;
+    flex-wrap: wrap;
+    align-items: flex-start;
+  }
+  .map-sidebar > *:first-child {
+    flex: 1 1 200px;
+  }
+  .map-brainy {
+    display: none;
+  }
+}
+
+/* ── Login ───────────────────────────────────────────────────── */
+
+.login-brainy {
+  position: absolute;
+  right: 10%;
+  bottom: 40px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+}
+
+@media (max-width: 900px) {
+  .login-brainy {
+    display: none;
+  }
+}
+
+/* ── Crisis Detail ───────────────────────────────────────────── */
+
+.crisis-page-inner {
+  max-width: 1280px;
+  margin: 0 auto;
+  padding: 16px 24px 48px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+@media (max-width: 640px) {
+  .crisis-page-inner {
+    padding: 12px 12px 32px;
+  }
+}

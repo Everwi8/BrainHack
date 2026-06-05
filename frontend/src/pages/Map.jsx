@@ -122,7 +122,7 @@ export default function Map() {
       </div>
 
       {/* ── Body: map + sidebar ── */}
-      <div style={{ display: "flex", gap: 16, padding: "0 24px 28px", alignItems: "flex-start" }}>
+      <div className="map-body">
 
         {/* Map area — flex:1 makes it take all remaining horizontal space */}
         <div style={{ flex: 1, borderRadius: 16, overflow: "hidden", minHeight: 580 }}>
@@ -142,7 +142,7 @@ export default function Map() {
         </div>
 
         {/* ── Sidebar ── */}
-        <div style={{ width: 210, flexShrink: 0, display: "flex", flexDirection: "column", gap: 16 }}>
+        <div className="map-sidebar">
 
           {/* Filter card */}
           <div style={{
@@ -158,7 +158,7 @@ export default function Map() {
           </div>
 
           {/* Brainy speech bubble + mascot */}
-          <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 2 }}>
+          <div className="map-brainy">
             {/* Speech bubble — the triangle at the bottom points down toward Brainy */}
             <div style={{
               background: "#fff",

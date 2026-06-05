@@ -261,7 +261,7 @@ export default function CrisisDetail() {
     <div style={{ minHeight: "100vh", background: CREAM, fontFamily: "'Nunito', sans-serif", color: INK }}>
       <Navbar />
 
-      <div style={{ maxWidth: 1280, margin: "0 auto", padding: "16px 24px 48px", display: "flex", flexDirection: "column", gap: 16 }}>
+      <div className="crisis-page-inner">
 
         {/* ── Back link ── */}
         <Link to="/map" style={{

@@ -29,7 +29,7 @@ return (
 
         {/* Brainy mascot bottom-right */}
         {showBrainy && (
-        <div style={{ position: "absolute", right: "10%", bottom: 40, display: "flex", flexDirection: "column", alignItems: "center", gap: 12 }}>
+        <div className="login-brainy">
             {bubble && (
             <div style={{ background: "#fff", borderRadius: 16, padding: "14px 18px", boxShadow: "0 2px 12px rgba(0,0,0,0.1)", fontSize: 14, fontWeight: 600, color: "#1a1a2e", textAlign: "center", maxWidth: 180, lineHeight: 1.5, position: "relative" }}>
                 {bubble}
