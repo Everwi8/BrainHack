@@ -6,6 +6,7 @@ import Map from "./pages/Map";
 import Chat from "./pages/Chat";
 import CrisisDetail from "./pages/CrisisDetail";
 import Timeline from "./pages/Timeline";
+import Volunteers from "./pages/Volunteers";
 
 export default function App() {
   return (
@@ -19,6 +20,7 @@ export default function App() {
         <Route path="/chat" element={<Chat />} />
         <Route path="/crisis" element={<CrisisDetail />} />
         <Route path="/timeline" element={<Timeline />} />
+        <Route path="/volunteers" element={<Volunteers />} />
       </Routes>
     </BrowserRouter>
   );
