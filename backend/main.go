@@ -33,7 +33,6 @@ func main() {
 	go ingestion.RunNEA(ctx)
 	go ingestion.RunLTA(ctx)
 	go ingestion.RunPUB(ctx)
-	go ingestion.RunMOH(ctx)
 
 	// ── HTTP server ───────────────────────────────────────────────────────────
 	r := gin.Default()
