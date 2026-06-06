@@ -8,6 +8,7 @@ import InlineShelterCard from "../components/chat/InlineShelterCard";
 import InlineHospitalCard from "../components/chat/InlineHospitalCard";
 import InlineCrisisCard from "../components/chat/InlineCrisisCard";
 import { api } from "../lib/api";
+import { useVoiceRecorder, extensionFromMime } from "../lib/useVoiceRecorder";
 
 // ── Mock responses (swap out for real API call when backend is ready) ──────────
 const MOCK_RESPONSES = {
@@ -147,6 +148,8 @@ export default function Chat() {
   const [isTyping, setIsTyping] = useState(false);
   const [sessionId, setSessionId] = useState(null);
   const [pendingImage, setPendingImage] = useState(null);   // { file, url }
+  const [isTranscribing, setIsTranscribing] = useState(false);
+  const { isRecording, start: startRecording, stop: stopRecording } = useVoiceRecorder();
   const messagesEndRef = useRef(null);
 
   useEffect(() => {
@@ -266,6 +269,51 @@ export default function Chat() {
       setMessages(prev => [...prev, { id: Date.now(), role: "bot", timestamp: nowTime(), ...MOCK_RESPONSES.situation }]);
     } finally {
       setIsTyping(false);
+    }
+  };
+
+  // handleMic toggles voice capture. Tapping while recording stops it, uploads
+  // the clip to the STT endpoint, then feeds the transcript through the normal
+  // chat flow so Brainy replies just as if the user had typed it.
+  const handleMic = async () => {
+    if (isTyping || isTranscribing) return;
+
+    if (!isRecording) {
+      const err = await startRecording();
+      if (err) {
+        setMessages(prev => [...prev, { id: Date.now(), role: "bot", text: err, timestamp: nowTime() }]);
+      }
+      return;
+    }
+
+    const clip = await stopRecording();
+    if (!clip) return;
+
+    setIsTranscribing(true);
+    try {
+      const form = new FormData();
+      form.append("audio", clip.blob, `voice-note.${extensionFromMime(clip.mimeType)}`);
+      if (sessionId) form.append("session_id", sessionId);
+
+      const data = await api.postForm("/api/voice", form);
+      if (data.session_id) setSessionId(data.session_id);
+
+      const transcript = (data.transcript ?? "").trim();
+      if (transcript) {
+        sendMessage(transcript);
+      } else {
+        setMessages(prev => [...prev, {
+          id: Date.now(), role: "bot", timestamp: nowTime(),
+          text: "I couldn't make out any speech in that recording — mind trying again?",
+        }]);
+      }
+    } catch (err) {
+      setMessages(prev => [...prev, {
+        id: Date.now(), role: "bot", timestamp: nowTime(),
+        text: `Sorry, I couldn't transcribe that. ${err.message}`,
+      }]);
+    } finally {
+      setIsTranscribing(false);
     }
   };
 
@@ -421,7 +469,10 @@ export default function Chat() {
             onChange={e => setInput(e.target.value)}
             onSend={() => (pendingImage ? sendPhoto() : sendMessage())}
             onPickImage={handlePickImage}
-            disabled={isTyping}
+            onMic={handleMic}
+            recording={isRecording}
+            transcribing={isTranscribing}
+            disabled={isTyping || isTranscribing}
           />
         </div>
       </div>

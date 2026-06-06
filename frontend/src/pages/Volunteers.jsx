@@ -2,8 +2,9 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Camera, Mic, Paperclip, Play, X } from "lucide-react";
 import Navbar from "../components/layout/NavBar";
+import { useVoiceRecorder, extensionFromMime } from "../lib/useVoiceRecorder";
 
-const API_BASE_URL = import.meta.env.VITE_API_URL ?? "http://localhost:3000";
+const API_BASE_URL = import.meta.env.VITE_API_URL ?? "http://localhost:8080";
 
 // dummy data for volunteer groups and messages
 const GROUPS = [
@@ -64,19 +65,14 @@ export default function Volunteers() {
       return acc;
     }, {})
   );
-  const [isRecording, setIsRecording] = useState(false);
   const [isSendingVoice, setIsSendingVoice] = useState(false);
-  const [recordingSeconds, setRecordingSeconds] = useState(0);
   const [pendingVoiceClip, setPendingVoiceClip] = useState(null);
   const [voiceStatus, setVoiceStatus] = useState("");
   const [voiceSessionByGroup, setVoiceSessionByGroup] = useState({});
 
-  const mediaRecorderRef = useRef(null);
-  const mediaStreamRef = useRef(null);
-  const audioChunksRef = useRef([]);
-  const timerRef = useRef(null);
+  const { isRecording, recordingSeconds, start: startRecorder, stop: stopRecorder } = useVoiceRecorder();
+
   const clipUrlsRef = useRef([]);
-  const recordingStartRef = useRef(0);
 
   const group = useMemo(
     () => GROUPS.find((item) => item.id === activeGroup) ?? GROUPS[0],
@@ -90,21 +86,10 @@ export default function Volunteers() {
       ? (voiceStatus || "Uploading and transcribing voice note...")
       : (voiceStatus || (pendingVoiceClip ? `Voice note ready (${formatDuration(pendingVoiceClip.duration)}).` : ""));
 
+  // Revoke any object URLs we created for clip playback on unmount.
   useEffect(() => {
-    return () => {
-      if (timerRef.current) clearInterval(timerRef.current);
-      if (mediaStreamRef.current) {
-        mediaStreamRef.current.getTracks().forEach((track) => track.stop());
-      }
-      clipUrlsRef.current.forEach((url) => URL.revokeObjectURL(url));
-    };
+    return () => clipUrlsRef.current.forEach((url) => URL.revokeObjectURL(url));
   }, []);
-
-  const stopMediaStream = () => {
-    if (!mediaStreamRef.current) return;
-    mediaStreamRef.current.getTracks().forEach((track) => track.stop());
-    mediaStreamRef.current = null;
-  };
 
   const clearPendingVoiceClip = (nextStatus = "") => {
     if (!pendingVoiceClip?.url) return;
@@ -114,77 +99,27 @@ export default function Volunteers() {
     setVoiceStatus(nextStatus);
   };
 
-  const stopVoiceRecording = () => {
-    if (!isRecording) return;
-    setIsRecording(false);
+  const stopVoiceRecording = async () => {
     setVoiceStatus("Processing voice note...");
-
-    if (timerRef.current) {
-      clearInterval(timerRef.current);
-      timerRef.current = null;
-    }
-
-    const recorder = mediaRecorderRef.current;
-    if (recorder && recorder.state !== "inactive") {
-      recorder.stop();
+    const clip = await stopRecorder();
+    if (!clip) {
+      setVoiceStatus("Unable to stop recording cleanly. Please retry.");
       return;
     }
-
-    stopMediaStream();
-    setVoiceStatus("Unable to stop recording cleanly. Please retry.");
+    const url = URL.createObjectURL(clip.blob);
+    clipUrlsRef.current.push(url);
+    setPendingVoiceClip({ blob: clip.blob, url, duration: clip.duration, mimeType: clip.mimeType });
+    setVoiceStatus(`Voice note ready (${formatDuration(clip.duration)}). Press send.`);
   };
 
   const startVoiceRecording = async () => {
-    if (!navigator.mediaDevices?.getUserMedia || typeof MediaRecorder === "undefined") {
-      setVoiceStatus("Voice recording is not supported in this browser.");
+    clearPendingVoiceClip();
+    const err = await startRecorder();
+    if (err) {
+      setVoiceStatus(err);
       return;
     }
-
-    try {
-      clearPendingVoiceClip();
-
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      mediaStreamRef.current = stream;
-
-      const preferredTypes = ["audio/webm;codecs=opus", "audio/webm", "audio/mp4"];
-      const mimeType = preferredTypes.find((type) => MediaRecorder.isTypeSupported(type));
-      const recorder = mimeType ? new MediaRecorder(stream, { mimeType }) : new MediaRecorder(stream);
-      mediaRecorderRef.current = recorder;
-
-      audioChunksRef.current = [];
-      recorder.ondataavailable = (event) => {
-        if (event.data && event.data.size > 0) {
-          audioChunksRef.current.push(event.data);
-        }
-      };
-
-      recorder.onstop = () => {
-        const elapsed = Math.max(1, Math.floor((Date.now() - recordingStartRef.current) / 1000));
-        const blob = new Blob(audioChunksRef.current, {
-          type: recorder.mimeType || "audio/webm",
-        });
-        const url = URL.createObjectURL(blob);
-        clipUrlsRef.current.push(url);
-        setPendingVoiceClip({ blob, url, duration: elapsed, mimeType: blob.type || recorder.mimeType || "audio/webm" });
-        setRecordingSeconds(elapsed);
-        setVoiceStatus(`Voice note ready (${formatDuration(elapsed)}). Press send.`);
-        stopMediaStream();
-      };
-
-      recordingStartRef.current = Date.now();
-      setRecordingSeconds(0);
-      setIsRecording(true);
-      setVoiceStatus("Recording... tap mic to stop.");
-
-      recorder.start();
-      timerRef.current = setInterval(() => {
-        const elapsed = Math.floor((Date.now() - recordingStartRef.current) / 1000);
-        setRecordingSeconds(elapsed);
-      }, 250);
-    } catch {
-      stopMediaStream();
-      setVoiceStatus("Microphone permission denied or unavailable.");
-    }
+    setVoiceStatus("Recording... tap mic to stop.");
   };
 
   const handleMicClick = () => {
@@ -202,15 +137,6 @@ export default function Volunteers() {
     localStorage.getItem("jwt_token") ||
     localStorage.getItem("jwt") ||
     "";
-
-  const extensionFromMime = (mimeType) => {
-    if (mimeType.includes("webm")) return "webm";
-    if (mimeType.includes("wav")) return "wav";
-    if (mimeType.includes("mpeg") || mimeType.includes("mp3")) return "mp3";
-    if (mimeType.includes("m4a") || mimeType.includes("mp4")) return "m4a";
-    if (mimeType.includes("ogg")) return "ogg";
-    return "webm";
-  };
 
   const readJSONSafe = async (res) => {
     const raw = await res.text();

@@ -1,3 +1,5 @@
+import { useMemo } from "react";
+import { useNavigate } from "react-router-dom";
 import Navbar from "../components/layout/NavBar";
 import { MapPin, MessageCircle, Share2, AlertTriangle, Zap, Users } from "lucide-react";
 
@@ -131,10 +133,25 @@ function FeedCard({ item }) {
         <span style={{ color: "#888", fontSize: 13 }}>{item.location}</span>
       </div>
 
-      <p style={{ margin: "0 0 14px", color: "#444", fontSize: 14, lineHeight: 1.6 }}>{item.body}</p>
+      {item.body && (
+        <p style={{ margin: "0 0 14px", color: "#444", fontSize: 14, lineHeight: 1.6 }}>{item.body}</p>
+      )}
+
+      {item.tags?.length > 0 && (
+        <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginBottom: 14 }}>
+          {item.tags.map(t => (
+            <span key={t} style={{
+              fontSize: 12, fontWeight: 700, color: "#D97706",
+              background: "#FFFBEB", borderRadius: 16, padding: "3px 10px",
+            }}>{t}</span>
+          ))}
+        </div>
+      )}
 
       {item.image && (
-        <div style={{ borderRadius: 12, overflow: "hidden", marginBottom: 14, height: 180, background: "#e0d5c5" }} />
+        <div style={{ borderRadius: 12, overflow: "hidden", marginBottom: 14 }}>
+          <img src={item.image} alt={item.title} style={{ width: "100%", maxHeight: 320, objectFit: "cover", display: "block" }} />
+        </div>
       )}
 
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
@@ -176,6 +193,18 @@ function FeedCard({ item }) {
 }
 
 export default function Timeline() {
+  const navigate = useNavigate();
+  // Reports submitted from the Report Crisis page are persisted to localStorage
+  // and shown at the top of the feed.
+  const reports = useMemo(() => {
+    try {
+      return JSON.parse(localStorage.getItem("brainy_reports") || "[]");
+    } catch {
+      return [];
+    }
+  }, []);
+  const feed = [...reports, ...MOCK_FEED];
+
   return (
     <div style={{ minHeight: "100vh", background: "#F5F0E8", fontFamily: "'Nunito', sans-serif" }}>
       <Navbar />
@@ -200,12 +229,15 @@ export default function Timeline() {
             <p style={{ margin: "0 0 16px", fontWeight: 700, fontSize: 14, color: "#1a1a2e", lineHeight: 1.4 }}>
               See what's happening<br />in Singapore!
             </p>
-            <button style={{
-              background: "#1a1a2e", color: "#fff",
-              border: "none", borderRadius: 24,
-              padding: "10px 20px", fontFamily: "'Nunito', sans-serif",
-              fontWeight: 700, fontSize: 13, cursor: "pointer", width: "100%",
-            }}>
+            <button
+              onClick={() => navigate("/report")}
+              style={{
+                background: "#1a1a2e", color: "#fff",
+                border: "none", borderRadius: 24,
+                padding: "10px 20px", fontFamily: "'Nunito', sans-serif",
+                fontWeight: 700, fontSize: 13, cursor: "pointer", width: "100%",
+              }}
+            >
               Report Crisis
             </button>
           </div>
@@ -225,7 +257,7 @@ export default function Timeline() {
 
         {/* Center feed */}
         <div>
-          {MOCK_FEED.map(item => <FeedCard key={item.id} item={item} />)}
+          {feed.map(item => <FeedCard key={item.id} item={item} />)}
         </div>
 
         {/* Right panel */}

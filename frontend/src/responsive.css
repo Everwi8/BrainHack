@@ -137,6 +137,41 @@
   }
 }
 
+/* ── Report Crisis ───────────────────────────────────────────── */
+
+.report-layout {
+  max-width: 1300px;
+  margin: 0 auto;
+  padding: 24px 40px 36px;
+  display: flex;
+  gap: 28px;
+  align-items: flex-start;
+}
+
+.report-main {
+  flex: 1;
+  min-width: 0;
+}
+
+.report-side {
+  width: 320px;
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 14px;
+}
+
+@media (max-width: 900px) {
+  .report-layout {
+    flex-direction: column;
+    padding: 16px;
+  }
+  .report-side {
+    width: 100%;
+  }
+}
+
 /* ── Timeline ────────────────────────────────────────────────── */
 
 .timeline-grid {
