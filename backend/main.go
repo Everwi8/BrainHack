@@ -79,7 +79,8 @@ func main() {
 		// James — volunteers + voice
 		api.GET("/volunteers", handler.ListVolunteers)
 		api.POST("/volunteers", middleware.RequireAuth(), handler.RegisterVolunteer)
-		api.POST("/voice", middleware.RequireAuth(), handler.Voice)
+		api.POST("/voice", handler.Voice) // testing without auth
+		// api.POST("/voice", middleware.RequireAuth(), handler.Voice)
 	}
 
 	port := os.Getenv("PORT")
