@@ -3,9 +3,11 @@ package main
 import (
 	"context"
 	"log"
+	"net/http"
 	"os"
 	"os/signal"
 	"syscall"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/joho/godotenv"
@@ -88,15 +90,27 @@ func main() {
 		port = "8080"
 	}
 
-	// Graceful shutdown on SIGINT/SIGTERM
+	srv := &http.Server{Addr: ":" + port, Handler: r}
+
+	// Graceful shutdown on SIGINT/SIGTERM: stop ingestion, then stop the HTTP
+	// server so ListenAndServe returns and the process actually exits.
 	go func() {
 		quit := make(chan os.Signal, 1)
 		signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
 		<-quit
 		log.Println("shutting down...")
 		cancel()
+
+		shutdownCtx, stop := context.WithTimeout(context.Background(), 5*time.Second)
+		defer stop()
+		if err := srv.Shutdown(shutdownCtx); err != nil {
+			log.Printf("server shutdown error: %v", err)
+		}
 	}()
 
 	log.Printf("server running on http://localhost:%s", port)
-	log.Fatal(r.Run(":" + port))
+	if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+		log.Fatal(err)
+	}
+	log.Println("server stopped")
 }
