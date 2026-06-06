@@ -1,9 +1,11 @@
-import { useState, useEffect } from "react";
-import { BedDouble, House, TriangleAlert } from "lucide-react";
+import { useState, useEffect, useCallback } from "react";
+import { BedDouble, House, TriangleAlert, FlaskConical, Radio } from "lucide-react";
 import Navbar from "../components/layout/NavBar";
 import MapView from "../components/map/MapView";
+import CrisisTriagePanel from "../components/map/CrisisTriagePanel";
 import BrainyMascot from "../components/BrainyMascot";
-import { mockCrisis, mockHospitals, mockShelters } from "../lib/mockData";
+import { api } from "../lib/api";
+import { mockHospitals, mockShelters } from "../lib/mockData";
 
 // ─── Stat chip ────────────────────────────────────────────────────────────────
 // A small pill displayed in the stats bar at the top of the page.
@@ -63,36 +65,89 @@ export default function Map() {
   // Each of these useState calls creates a piece of React state.
   // React re-renders the component whenever you call the setter (e.g. setCrises).
   const [crisis,    setCrisis]    = useState([]);
-  const [shelters,  setShelters]  = useState([]);
-  const [hospitals, setHospitals] = useState([]);
+  // Shelters/hospitals are map-visual only (not part of triage) — still mock for
+  // now, so seed them as initial state rather than fetching.
+  const [shelters]  = useState(mockShelters);
+  const [hospitals] = useState(mockHospitals);
   const [loading,   setLoading]   = useState(true);
   const [userPos,   setUserPos]   = useState(null); // null until geolocation resolves
 
   // Three booleans: one per marker layer. All default to visible (true).
   const [filters, setFilters] = useState({ crises: true, shelters: true, hospitals: true });
 
-  // useEffect runs once after the component first appears on screen (the empty []
-  // dependency array means "only run on mount, not on every re-render").
-  // This is where we load data. In production replace the mock imports with
-  // real fetch() calls to the backend.
+  // Demo/live data-source toggle (backed by /api/admin/data-source).
+  const [mode, setMode]           = useState(null);  // "demo" | "live" | null while unknown
+  const [switching, setSwitching] = useState(false);
+
+  // Per-crisis triage popup: which crisis is selected and its triage payload.
+  const [selected,      setSelected]      = useState(null); // the clicked crisis row
+  const [triage,        setTriage]        = useState(null); // { findings, tasks, ... }
+  const [triageLoading, setTriageLoading] = useState(false);
+  const [triageError,   setTriageError]   = useState(null);
+
+  // loadCrises pulls the live crisis list from the backend. Shelters/hospitals
+  // stay on mock data for now — they're map-visual only, not part of triage.
+  const loadCrises = useCallback(async () => {
+    // Note: no synchronous setLoading(true) here — `loading` starts true on
+    // mount, and the toggle handler flips it before re-calling this.
+    try {
+      const data = await api.get("/api/crises");
+      setCrisis(Array.isArray(data) ? data : []);
+    } catch (err) {
+      console.error("load crises:", err);
+      setCrisis([]);
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  // On mount: resolve location, load crises, seed the mock layers, and read the
+  // current data-source mode so the toggle button shows the right state.
   useEffect(() => {
-    // Ask the browser for the user's GPS position.
-    // The first callback runs on success; the second runs if permission is denied.
     navigator.geolocation.getCurrentPosition(
       (pos) => setUserPos([pos.coords.latitude, pos.coords.longitude]),
       ()    => setUserPos([1.3521, 103.8198]), // fall back to Singapore centre
     );
+    // Deferred so the state updates land in an async callback, not synchronously
+    // in the effect body (react-hooks/set-state-in-effect).
+    Promise.resolve().then(loadCrises);
+    api.get("/api/admin/data-source").then(d => setMode(d.mode)).catch(() => {});
+  }, [loadCrises]);
 
-    // ── MOCK: swap these three lines for real fetch() calls when backend is ready ──
-    // Real version would look like:
-    //   const res = await fetch("/api/crises");
-    //   const data = await res.json();
-    //   setCrisis(data);
-    setCrisis(mockCrisis);
-    setShelters(mockShelters);
-    setHospitals(mockHospitals);
-    setLoading(false);
+  // Clicking a crisis circle loads that crisis's triage (findings + tasks).
+  const handleSelectCrisis = useCallback(async (c) => {
+    setSelected(c);
+    setTriage(null);
+    setTriageError(null);
+    setTriageLoading(true);
+    try {
+      const data = await api.get(`/api/crises/${c.id}/triage`);
+      setTriage(data);
+    } catch (err) {
+      setTriageError(err.message || "Could not load triage.");
+    } finally {
+      setTriageLoading(false);
+    }
   }, []);
+
+  // Flip the backend triage data source between demo and live, then reload.
+  const handleToggleMode = useCallback(async () => {
+    if (!mode || switching) return;
+    const next = mode === "demo" ? "live" : "demo";
+    setSwitching(true);
+    setLoading(true);
+    try {
+      const d = await api.post("/api/admin/data-source", { mode: next });
+      setMode(d.mode);
+      setSelected(null);
+      setTriage(null);
+      await loadCrises();
+    } catch (err) {
+      console.error("toggle data source:", err);
+    } finally {
+      setSwitching(false);
+    }
+  }, [mode, switching, loadCrises]);
 
   // Derived values computed from state — no extra useState needed.
   const activeCrisis = crisis.filter(c => c.status === "active").length;
@@ -119,13 +174,39 @@ export default function Map() {
         <StatChip icon={<BedDouble  size={14} />} label={`Hospital beds: ${totalBeds}`}   bg="#EFF6FF" color="#1E40AF" />
         <StatChip icon={<House      size={14} />} label={`Shelters: ${shelters.length}`}  bg="#F0FDF4" color="#14532D" />
         <StatChip icon={<TriangleAlert size={14} />} label={`Active Crises: ${activeCrisis}`} bg="#FEF3C7" color="#92400E" />
+
+        {/* Demo/live data-source toggle. Hidden until we know the current mode. */}
+        {mode && (
+          <button
+            onClick={handleToggleMode}
+            disabled={switching}
+            title={mode === "demo"
+              ? "Showing the seeded demo scenario. Click to switch to live data."
+              : "Showing live cross-agency feeds. Click to switch to the demo scenario."}
+            style={{
+              marginLeft: "auto",
+              display: "flex", alignItems: "center", gap: 7,
+              background: mode === "demo" ? "#FCE7F3" : "#E6F0EC",
+              border: `1px solid ${mode === "demo" ? "#DB2777" : "#14532D"}33`,
+              borderRadius: 20, padding: "7px 16px",
+              fontFamily: "'Nunito', sans-serif", fontSize: 13, fontWeight: 700,
+              color: mode === "demo" ? "#9D174D" : "#14532D",
+              cursor: switching ? "default" : "pointer",
+              opacity: switching ? 0.6 : 1, whiteSpace: "nowrap",
+            }}
+          >
+            {mode === "demo" ? <FlaskConical size={14} /> : <Radio size={14} />}
+            <span>{switching ? "Switching…" : `Data: ${mode === "demo" ? "Demo" : "Live"}`}</span>
+          </button>
+        )}
       </div>
 
       {/* ── Body: map + sidebar ── */}
       <div className="map-body">
 
-        {/* Map area — flex:1 makes it take all remaining horizontal space */}
-        <div style={{ flex: 1, borderRadius: 16, overflow: "hidden", minHeight: 580 }}>
+        {/* Map area — flex:1 makes it take all remaining horizontal space.
+            position:relative so the triage popup can overlay it. */}
+        <div style={{ position: "relative", flex: 1, borderRadius: 16, overflow: "hidden", minHeight: 580 }}>
           {/*
             We pass pre-filtered arrays into MapView.
             When filters.crises is false we pass [] (empty array), so MapView
@@ -133,12 +214,24 @@ export default function Map() {
             This keeps MapView "dumb" and Map.jsx in charge of data logic.
           */}
           <MapView
-            crisis={filters.crisis       ? crisis    : []}
+            crisis={filters.crises       ? crisis    : []}
             shelters={filters.shelters   ? shelters  : []}
             hospitals={filters.hospitals ? hospitals : []}
             userPos={userPos}
             loading={loading}
+            onCrisisSelect={handleSelectCrisis}
           />
+
+          {/* Triage popup — appears when a crisis circle is clicked. */}
+          {selected && (
+            <CrisisTriagePanel
+              crisis={selected}
+              data={triage}
+              loading={triageLoading}
+              error={triageError}
+              onClose={() => { setSelected(null); setTriage(null); setTriageError(null); }}
+            />
+          )}
         </div>
 
         {/* ── Sidebar ── */}
@@ -154,7 +247,7 @@ export default function Map() {
             <div style={{ fontWeight: 800, fontSize: 14, color: "#1a1a2e", marginBottom: 14 }}>View:</div>
             <FilterRow color="#2563EB" label="Hospital beds" checked={filters.hospitals} onChange={() => toggleFilter("hospitals")} />
             <FilterRow color="#16A34A" label="Shelter"       checked={filters.shelters}  onChange={() => toggleFilter("shelters")}  />
-            <FilterRow color="#EF4444" label="Crisis"        checked={filters.crisis}    onChange={() => toggleFilter("crisis")}    />
+            <FilterRow color="#EF4444" label="Crisis"        checked={filters.crises}    onChange={() => toggleFilter("crises")}    />
           </div>
 
           {/* Brainy speech bubble + mascot */}

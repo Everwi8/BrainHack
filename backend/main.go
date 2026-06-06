@@ -23,8 +23,9 @@ func main() {
 
 	lib.Init()
 
-	// Pick the triage data source: live (Sanjey's crises table) when SUPABASE_URL
-	// is configured, else mock demo data. See lib.SelectDataProvider.
+	// Pick the triage data source: DATA_SOURCE=demo serves the canned demo
+	// scenario (db/seeds/demo_crises.sql), anything else uses the live
+	// cross-agency feeds. Flippable at runtime via /api/admin/data-source.
 	lib.SelectDataProvider()
 
 	// ── Ingestion goroutines ──────────────────────────────────────────────────
@@ -32,9 +33,16 @@ func main() {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	go ingestion.RunNEA(ctx)
-	go ingestion.RunLTA(ctx)
-	go ingestion.RunPUB(ctx)
+	// In demo mode the crises table holds only our curated seed rows, so we skip
+	// live ingestion entirely — otherwise it would re-upsert live-feed crises
+	// (and noise) on top of the seed every 5 minutes. Live mode runs it normally.
+	if os.Getenv("DATA_SOURCE") == "demo" {
+		log.Println("[ingestion] DATA_SOURCE=demo — live ingestion paused")
+	} else {
+		go ingestion.RunNEA(ctx)
+		go ingestion.RunLTA(ctx)
+		go ingestion.RunPUB(ctx)
+	}
 
 	// ── HTTP server ───────────────────────────────────────────────────────────
 	r := gin.Default()
@@ -52,6 +60,7 @@ func main() {
 		// Crises (public read)
 		api.GET("/crises", handler.ListCrises)
 		api.GET("/crises/:id", handler.GetCrisis)
+		api.GET("/crises/:id/triage", handler.CrisisTriage) // triage + tasks for one crisis
 
 		// Tasks — reads are public, writes require auth
 		api.GET("/tasks", handler.ListTasks)
@@ -83,6 +92,10 @@ func main() {
 		api.POST("/volunteers", middleware.RequireAuth(), handler.RegisterVolunteer)
 		api.POST("/voice", handler.Voice) // testing without auth
 		// api.POST("/voice", middleware.RequireAuth(), handler.Voice)
+
+		// Admin — runtime demo/live data toggle (open for demo simplicity)
+		api.GET("/admin/data-source", handler.DataSourceStatus)
+		api.POST("/admin/data-source", handler.SwitchDataSource)
 	}
 
 	port := os.Getenv("PORT")

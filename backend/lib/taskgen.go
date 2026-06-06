@@ -265,6 +265,34 @@ func GenerateTasksFromTriage() ([]TaskCard, error) {
 	return GenerateTaskCards(report)
 }
 
+// TriageForCrisis runs triage and returns only the findings — and the task cards
+// derived from them — that belong to the given crisis row. This backs the
+// per-crisis map-click flow: tap a crisis circle, see its triage + tasks. A
+// crisis with no matching findings (e.g. it has gone quiet) yields an empty
+// report and no tasks, not an error.
+func TriageForCrisis(crisisID string) (TriageReport, []TaskCard, error) {
+	report, err := RunTriage()
+	if err != nil {
+		return TriageReport{}, nil, err
+	}
+
+	scoped := TriageReport{GeneratedAt: report.GeneratedAt}
+	for _, f := range report.Findings {
+		if f.CrisisID == crisisID {
+			scoped.Findings = append(scoped.Findings, f)
+		}
+	}
+	if len(scoped.Findings) == 0 {
+		return scoped, nil, nil
+	}
+
+	cards, err := GenerateTaskCards(scoped)
+	if err != nil {
+		return scoped, nil, err
+	}
+	return scoped, cards, nil
+}
+
 // ForwardTasks writes generated cards into the shared tasks store via lib.DB so
 // they show up alongside coordinator-created tasks. Only cards tied to a real
 // crisis row are written (a task needs a valid crisis_id FK); cascade findings

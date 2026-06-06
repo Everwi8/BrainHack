@@ -333,6 +333,7 @@ func cascadeFindings(weather []WeatherReading, floods []FloodReading, haze []Haz
 			Location: f.Location,
 			Sources:  []string{"NEA", "PUB"},
 			Cascade:  true,
+			CrisisID: f.CrisisID, // inherit the originating flood's crisis so this surfaces per-crisis
 		})
 	}
 
@@ -351,6 +352,7 @@ func cascadeFindings(weather []WeatherReading, floods []FloodReading, haze []Haz
 				Location: st.Name,
 				Sources:  []string{"PUB", "LTA"},
 				Cascade:  true,
+				CrisisID: f.CrisisID, // originating flood crisis
 			})
 		}
 	}
@@ -365,6 +367,10 @@ func cascadeFindings(weather []WeatherReading, floods []FloodReading, haze []Haz
 				continue
 			}
 			if regionContains(h.Region, d.Lat, d.Lng) {
+				crisisID := d.CrisisID // prefer the dengue cluster row (matches Location); fall back to haze
+				if crisisID == "" {
+					crisisID = h.CrisisID
+				}
 				out = append(out, TriageFinding{
 					Type:     "cascade",
 					Severity: SeverityWarning,
@@ -374,6 +380,7 @@ func cascadeFindings(weather []WeatherReading, floods []FloodReading, haze []Haz
 					Location: d.Locality,
 					Sources:  []string{"NEA"},
 					Cascade:  true,
+					CrisisID: crisisID,
 				})
 			}
 		}

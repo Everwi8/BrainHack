@@ -2,10 +2,14 @@ import L from "leaflet";
 import { Marker, Tooltip } from "react-leaflet";
 import { useNavigate } from "react-router-dom";
 
-// Maps each severity level to a dot colour matching BrainySG's brand colours
+// Maps each severity level to a dot colour matching BrainySG's brand colours.
+// Covers both the triage vocabulary (critical/warning/low) and the crises-table
+// vocabulary (low/medium/high/critical) so live rows colour correctly.
 const SEVERITY_COLORS = {
   critical: "#EF4444", // red
+  high:     "#EF4444", // red
   warning:  "#F97316", // orange
+  medium:   "#F97316", // orange
   low:      "#EAB308", // yellow
 };
 
@@ -31,7 +35,7 @@ function buildIcon(severity) {
   });
 }
 
-export default function CrisisMarker({ crisis }) {
+export default function CrisisMarker({ crisis, onSelect }) {
   // useNavigate is React Router's hook for programmatic navigation.
   // Calling navigate("/crises/crisis-1") is the same as the user clicking
   // <Link to="/crises/crisis-1">, but triggered from a Leaflet click event.
@@ -43,9 +47,12 @@ export default function CrisisMarker({ crisis }) {
       icon={buildIcon(crisis.severity)}
       eventHandlers={{
         // Leaflet fires "click" when the marker is clicked on the map.
-        // We read crisis.id and build the URL dynamically so each marker
-        // navigates to its own detail page.
-        click: () => navigate(`/crises/${crisis.id}`),
+        // When the parent supplies onSelect (the Map page's triage popup), call
+        // it; otherwise fall back to navigating to the crisis detail page.
+        click: () => {
+          if (onSelect) onSelect(crisis);
+          else navigate(`/crises/${crisis.id}`);
+        },
       }}
     >
       {/* Tooltip appears on hover — shows the crisis name, severity, and a
@@ -60,7 +67,7 @@ export default function CrisisMarker({ crisis }) {
         </span>
         <br />
         <span style={{ fontFamily: "Nunito, sans-serif", fontSize: 12, fontWeight: 800, color: "#16A34A" }}>
-          Click for details →
+          {onSelect ? "Click for triage →" : "Click for details →"}
         </span>
       </Tooltip>
     </Marker>

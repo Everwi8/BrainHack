@@ -33,3 +33,22 @@ func TriageTasks(c *gin.Context) {
 	lib.ForwardTasks(tasks)
 	c.JSON(http.StatusOK, gin.H{"tasks": tasks})
 }
+
+// CrisisTriage returns the triage findings and generated task cards scoped to a
+// single crisis. Backs the map-click flow: GET /api/crises/:id/triage →
+// {crisis_id, generated_at, findings, tasks}. Findings/tasks are empty (not an
+// error) when nothing currently links to the crisis.
+func CrisisTriage(c *gin.Context) {
+	id := c.Param("id")
+	report, tasks, err := lib.TriageForCrisis(id)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{
+		"crisis_id":    id,
+		"generated_at": report.GeneratedAt,
+		"findings":     report.Findings,
+		"tasks":        tasks,
+	})
+}

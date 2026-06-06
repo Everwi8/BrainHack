@@ -172,9 +172,11 @@ type weatherResponse struct {
 	} `json:"data"`
 }
 
+// Only genuinely severe forecasts become flood crises. Plain "Thundery Showers"
+// and "Passing Showers" are everyday Singapore weather — including them flooded
+// the map with bogus medium "flood" circles, so they are deliberately excluded.
 var severeKeywords = []string{
-	"Thundery Showers", "Heavy Thundery Showers", "Heavy Rain",
-	"Heavy Showers", "Passing Showers",
+	"Heavy Thundery Showers", "Heavy Rain", "Heavy Showers",
 }
 
 func fetchWeather() error {

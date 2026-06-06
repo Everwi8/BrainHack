@@ -6,10 +6,20 @@ import CrisisCard from "../components/crisis/CrisisCard";
 import BrainyPanel from "../components/crisis/BrainyPanel";
 import { AlertTriangle, Map } from "lucide-react";
 import BrainyMascot from "../components/BrainyMascot";
+import { useAuth } from "../lib/auth";
+
+function greeting() {
+  const h = new Date().getHours();
+  if (h < 12) return "Good morning";
+  if (h < 18) return "Good afternoon";
+  return "Good evening";
+}
 
 export default function Home() {
   const navigate = useNavigate();
   const [alertVisible, setAlertVisible] = useState(true);
+  const { user } = useAuth();
+  const firstName = user?.name?.split(" ")[0] ?? "there";
 
   return (
     <div style={{
@@ -67,7 +77,7 @@ export default function Home() {
             position: "relative",
             maxWidth: 320,
           }}>
-            Good morning, John!<br />
+            {greeting()}, {firstName}!<br />
             There are 2 situations today,<br />
             do you want a quick brief?
             <div style={{

@@ -13,6 +13,7 @@ package lib
 
 import (
 	"log"
+	"os"
 	"strings"
 	"sync"
 	"time"
@@ -284,9 +285,54 @@ func (emptyProvider) Haze() ([]HazeReading, error)              { return nil, ni
 func (emptyProvider) Dengue() ([]DengueCluster, error)          { return nil, nil }
 func (emptyProvider) Transport() ([]TransportDisruption, error) { return nil, nil }
 
-// SelectDataProvider installs the live data source. Call once after lib.Init().
-// Triage now runs only on live cross-agency feeds — there is no mock fallback.
+// ---------------------------------------------------------------------------
+// Data-source selection (demo vs live)
+// ---------------------------------------------------------------------------
+
+var (
+	dataSourceMu   sync.RWMutex
+	dataSourceMode = "live"
+)
+
+// CurrentDataSource returns the active triage data source: "demo" or "live".
+func CurrentDataSource() string {
+	dataSourceMu.RLock()
+	defer dataSourceMu.RUnlock()
+	return dataSourceMode
+}
+
+// SetDataSource swaps the triage data source by name and records the choice so
+// CurrentDataSource can report it. Returns false for an unrecognised mode.
+//
+// This swaps only the triage provider. Live ingestion is started (or skipped)
+// once at boot from the DATA_SOURCE env var (see main.go), so flipping to
+// "live" at runtime does not retroactively start ingestion if the server booted
+// in demo mode — and flipping to "demo" does not stop ingestion already running.
+func SetDataSource(mode string) bool {
+	switch mode {
+	case "demo":
+		SetDataProvider(NewDemoDataProvider())
+	case "live":
+		SetDataProvider(NewLiveDataProvider())
+	default:
+		return false
+	}
+	dataSourceMu.Lock()
+	dataSourceMode = mode
+	dataSourceMu.Unlock()
+	log.Printf("[triage] data provider: %s", mode)
+	return true
+}
+
+// SelectDataProvider installs the triage data source at startup. Call once after
+// lib.Init(). DATA_SOURCE=demo installs the canned demo scenario (for offline
+// demos when the live feeds are quiet); anything else uses the live
+// cross-agency feeds. The choice can be flipped at runtime via SetDataSource
+// (see the /api/admin/data-source handler).
 func SelectDataProvider() {
-	SetDataProvider(NewLiveDataProvider())
-	log.Println("[triage] data provider: live cross-agency feeds")
+	mode := "live"
+	if os.Getenv("DATA_SOURCE") == "demo" {
+		mode = "demo"
+	}
+	SetDataSource(mode)
 }

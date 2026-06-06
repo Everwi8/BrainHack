@@ -32,7 +32,7 @@ function LegendRow({ color, label }) {
 // MapView receives pre-filtered arrays from Map.jsx.
 // When the user unchecks "Shelters", Map.jsx passes an empty [] here,
 // so MapView doesn't need to know about filter state at all — clean separation.
-export default function MapView({ crisis = [], shelters = [], hospitals = [], userPos, loading }) {
+export default function MapView({ crisis = [], shelters = [], hospitals = [], userPos, loading, onCrisisSelect }) {
   return (
     // Outer wrapper is position:relative so the legend overlay and
     // loading spinner can sit on top of the map using position:absolute.
@@ -85,7 +85,7 @@ export default function MapView({ crisis = [], shelters = [], hospitals = [], us
         */}
         <MarkerClusterGroup>
           {crisis.map(crisis => (
-            <CrisisMarker key={crisis.id} crisis={crisis} />
+            <CrisisMarker key={crisis.id} crisis={crisis} onSelect={onCrisisSelect} />
           ))}
         </MarkerClusterGroup>
 
