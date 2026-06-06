@@ -3,6 +3,8 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { Camera, Mic, Paperclip, Play, X } from "lucide-react";
 import Navbar from "../components/layout/NavBar";
 
+const API_BASE_URL = import.meta.env.VITE_API_URL ?? "http://localhost:3000";
+
 // dummy data for volunteer groups and messages
 const GROUPS = [
   {
@@ -63,9 +65,11 @@ export default function Volunteers() {
     }, {})
   );
   const [isRecording, setIsRecording] = useState(false);
+  const [isSendingVoice, setIsSendingVoice] = useState(false);
   const [recordingSeconds, setRecordingSeconds] = useState(0);
   const [pendingVoiceClip, setPendingVoiceClip] = useState(null);
   const [voiceStatus, setVoiceStatus] = useState("");
+  const [voiceSessionByGroup, setVoiceSessionByGroup] = useState({});
 
   const mediaRecorderRef = useRef(null);
   const mediaStreamRef = useRef(null);
@@ -79,12 +83,12 @@ export default function Volunteers() {
     [activeGroup]
   );
   const messages = messagesByGroup[activeGroup] ?? [];
-  const canSend = Boolean(draft.trim() || pendingVoiceClip) && !isRecording;
+  const canSend = Boolean(draft.trim() || pendingVoiceClip) && !isRecording && !isSendingVoice;
   const statusText = isRecording
     ? `Recording ${formatDuration(recordingSeconds)}...`
-    : pendingVoiceClip
-      ? `Voice note ready (${formatDuration(pendingVoiceClip.duration)}).`
-      : voiceStatus;
+    : isSendingVoice
+      ? (voiceStatus || "Uploading and transcribing voice note...")
+      : (voiceStatus || (pendingVoiceClip ? `Voice note ready (${formatDuration(pendingVoiceClip.duration)}).` : ""));
 
   useEffect(() => {
     return () => {
@@ -161,7 +165,7 @@ export default function Volunteers() {
         });
         const url = URL.createObjectURL(blob);
         clipUrlsRef.current.push(url);
-        setPendingVoiceClip({ blob, url, duration: elapsed });
+        setPendingVoiceClip({ blob, url, duration: elapsed, mimeType: blob.type || recorder.mimeType || "audio/webm" });
         setRecordingSeconds(elapsed);
         setVoiceStatus(`Voice note ready (${formatDuration(elapsed)}). Press send.`);
         stopMediaStream();
@@ -184,6 +188,7 @@ export default function Volunteers() {
   };
 
   const handleMicClick = () => {
+    if (isSendingVoice) return;
     if (isRecording) {
       stopVoiceRecording();
       return;
@@ -191,28 +196,142 @@ export default function Volunteers() {
     startVoiceRecording();
   };
 
-  const handleSendMessage = () => {
+  const getAuthToken = () =>
+    localStorage.getItem("token") ||
+    localStorage.getItem("authToken") ||
+    localStorage.getItem("jwt_token") ||
+    localStorage.getItem("jwt") ||
+    "";
+
+  const extensionFromMime = (mimeType) => {
+    if (mimeType.includes("webm")) return "webm";
+    if (mimeType.includes("wav")) return "wav";
+    if (mimeType.includes("mpeg") || mimeType.includes("mp3")) return "mp3";
+    if (mimeType.includes("m4a") || mimeType.includes("mp4")) return "m4a";
+    if (mimeType.includes("ogg")) return "ogg";
+    return "webm";
+  };
+
+  const readJSONSafe = async (res) => {
+    const raw = await res.text();
+    if (!raw.trim()) return { __empty: true };
+    try {
+      return JSON.parse(raw);
+    } catch {
+      return { __raw: raw };
+    }
+  };
+
+  const uploadVoice = async (voiceClip, sessionID) => {
+    const form = new FormData();
+    const ext = extensionFromMime(voiceClip.mimeType || "");
+    form.append("audio", voiceClip.blob, `voice-note.${ext}`);
+    if (sessionID) form.append("session_id", sessionID);
+
+    const token = getAuthToken();
+    const headers = token ? { Authorization: `Bearer ${token}` } : {};
+
+    const res = await fetch(`${API_BASE_URL}/api/voice`, {
+      method: "POST",
+      headers,
+      body: form,
+    });
+
+    const body = await readJSONSafe(res);
+
+    if (!res.ok) {
+      throw new Error(body.error ?? body.__raw ?? `Voice request failed: ${res.status}`);
+    }
+
+    if (body.__empty) {
+      throw new Error("Voice endpoint returned an empty response. Restart backend and verify /api/voice handler is returning JSON.");
+    }
+
+    return body;
+  };
+
+  const handleSendMessage = async () => {
     if (!canSend) return;
 
     const outgoingText = draft.trim();
-    const message = {
-      id: `m-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
-      sender: "Me",
-      role: "me",
-      text: outgoingText,
-      audioDuration: pendingVoiceClip?.duration ?? null,
-      audioUrl: pendingVoiceClip?.url ?? null,
-      at: new Date().toLocaleTimeString("en-SG", { hour: "2-digit", minute: "2-digit" }),
-    };
+    const now = () => new Date().toLocaleTimeString("en-SG", { hour: "2-digit", minute: "2-digit" });
 
-    setMessagesByGroup((prev) => ({
-      ...prev,
-      [activeGroup]: [...(prev[activeGroup] ?? []), message],
-    }));
+    // Text-only path remains local for now.
+    if (!pendingVoiceClip) {
+      const textMsg = {
+        id: `m-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+        sender: "Me",
+        role: "me",
+        text: outgoingText,
+        at: now(),
+      };
+      setMessagesByGroup((prev) => ({
+        ...prev,
+        [activeGroup]: [...(prev[activeGroup] ?? []), textMsg],
+      }));
+      setDraft("");
+      setVoiceStatus("");
+      return;
+    }
 
-    setDraft("");
-    setPendingVoiceClip(null);
-    setVoiceStatus("");
+    setIsSendingVoice(true);
+    setVoiceStatus("Uploading and transcribing voice note...");
+
+    try {
+      const sessionID = voiceSessionByGroup[activeGroup] ?? "";
+      const data = await uploadVoice(pendingVoiceClip, sessionID);
+      const transcript = (data.transcript ?? "").trim();
+      const reply = (data.reply ?? "").trim();
+      const nextSessionID = data.session_id ?? sessionID;
+
+      if (nextSessionID) {
+        setVoiceSessionByGroup((prev) => ({ ...prev, [activeGroup]: nextSessionID }));
+      }
+
+      setMessagesByGroup((prev) => {
+        const list = [...(prev[activeGroup] ?? [])];
+
+        if (outgoingText) {
+          list.push({
+            id: `m-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+            sender: "Me",
+            role: "me",
+            text: outgoingText,
+            at: now(),
+          });
+        }
+
+        list.push({
+          id: `m-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+          sender: "Me",
+          role: "me",
+          text: transcript || "Voice note sent.",
+          audioDuration: pendingVoiceClip.duration ?? null,
+          audioUrl: pendingVoiceClip.url ?? null,
+          at: now(),
+        });
+
+        if (reply) {
+          list.push({
+            id: `m-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+            sender: "Brainy • auto-update",
+            role: "brainy",
+            text: reply,
+            at: now(),
+          });
+        }
+
+        return { ...prev, [activeGroup]: list };
+      });
+
+      setDraft("");
+      setPendingVoiceClip(null);
+      setVoiceStatus("Voice note sent.");
+    } catch (err) {
+      setVoiceStatus(err?.message || "Could not send voice note.");
+    } finally {
+      setIsSendingVoice(false);
+    }
   };
 
   return (
