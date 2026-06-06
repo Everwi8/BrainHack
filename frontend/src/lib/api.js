@@ -1,8 +1,15 @@
 const BASE_URL = import.meta.env.VITE_API_URL ?? 'http://localhost:8080';
 
+// authHeaders pulls the stored JWT so every request is authed. Read from
+// localStorage (not the auth context) to avoid an import cycle with auth.jsx.
+function authHeaders() {
+  const token = localStorage.getItem('brainy_token');
+  return token ? { Authorization: `Bearer ${token}` } : {};
+}
+
 async function request(path, options = {}) {
   const res = await fetch(`${BASE_URL}${path}`, {
-    headers: { 'Content-Type': 'application/json', ...options.headers },
+    headers: { 'Content-Type': 'application/json', ...authHeaders(), ...options.headers },
     ...options,
   });
   if (!res.ok) {
@@ -15,7 +22,11 @@ async function request(path, options = {}) {
 // postForm sends multipart/form-data (e.g. file uploads). The Content-Type is
 // left unset so the browser supplies the multipart boundary automatically.
 async function postForm(path, formData) {
-  const res = await fetch(`${BASE_URL}${path}`, { method: 'POST', body: formData });
+  const res = await fetch(`${BASE_URL}${path}`, {
+    method: 'POST',
+    headers: { ...authHeaders() },
+    body: formData,
+  });
   if (!res.ok) {
     const body = await res.json().catch(() => ({}));
     throw new Error(body.error ?? `Request failed: ${res.status}`);

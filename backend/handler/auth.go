@@ -17,6 +17,7 @@ type registerRequest struct {
 	Email    string `json:"email"    binding:"required,email"`
 	Password string `json:"password" binding:"required,min=6"`
 	Name     string `json:"name"     binding:"required"`
+	Role     string `json:"role"`
 }
 
 type loginRequest struct {
@@ -37,10 +38,16 @@ func Register(c *gin.Context) {
 		return
 	}
 
+	role := req.Role
+	if role == "" {
+		role = "resident"
+	}
+
 	user, err := lib.DB.CreateUser(lib.User{
 		Email:        req.Email,
 		PasswordHash: string(hash),
 		Name:         req.Name,
+		Role:         role,
 	})
 	if err != nil {
 		c.JSON(http.StatusConflict, gin.H{"error": "email already in use"})
@@ -55,7 +62,7 @@ func Register(c *gin.Context) {
 
 	c.JSON(http.StatusCreated, gin.H{
 		"token": token,
-		"user":  gin.H{"id": user.ID, "email": user.Email, "name": user.Name},
+		"user":  gin.H{"id": user.ID, "email": user.Email, "name": user.Name, "role": user.Role},
 	})
 }
 
@@ -85,7 +92,7 @@ func Login(c *gin.Context) {
 
 	c.JSON(http.StatusOK, gin.H{
 		"token": token,
-		"user":  gin.H{"id": user.ID, "email": user.Email, "name": user.Name},
+		"user":  gin.H{"id": user.ID, "email": user.Email, "name": user.Name, "role": user.Role},
 	})
 }
 

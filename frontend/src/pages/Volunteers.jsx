@@ -132,6 +132,7 @@ export default function Volunteers() {
   };
 
   const getAuthToken = () =>
+    localStorage.getItem("brainy_token") ||
     localStorage.getItem("token") ||
     localStorage.getItem("authToken") ||
     localStorage.getItem("jwt_token") ||

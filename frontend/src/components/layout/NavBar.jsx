@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
-import { Bell, HeartPulse, UserCircle, Menu, X } from "lucide-react";
+import { Bell, HeartPulse, UserCircle, Menu, X, LogOut } from "lucide-react";
+import { useAuth } from "../../lib/auth";
 
 const NAV_LINKS = [
   { label: "Home",  path: "/home" },
@@ -14,12 +15,20 @@ const NAV_LINKS = [
 export default function Navbar() {
   const navigate = useNavigate();
   const location = useLocation();
+  const { user, logout } = useAuth();
   const [menuOpen, setMenuOpen] = useState(false);
 
   const handleNav = (path) => {
     navigate(path);
     setMenuOpen(false);
   };
+
+  const handleLogout = () => {
+    logout();
+    navigate("/login");
+  };
+
+  const firstName = user?.name?.split(" ")[0] ?? "Guest";
 
   return (
     <>
@@ -66,11 +75,29 @@ export default function Navbar() {
             </div>
             <div style={{ position: "absolute", top: 6, right: 6, width: 8, height: 8, borderRadius: "50%", background: "#EF4444" }} />
           </div>
-          <div style={{
-            width: 38, height: 38, borderRadius: "50%",
-            background: "#e0d5c5", display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer",
-          }}>
-            <UserCircle size={28} color="#7a6a56" />
+          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            <div style={{
+              width: 38, height: 38, borderRadius: "50%",
+              background: "#e0d5c5", display: "flex", alignItems: "center", justifyContent: "center",
+            }}>
+              <UserCircle size={28} color="#7a6a56" />
+            </div>
+            <span style={{ fontSize: 14, fontWeight: 700, color: "#1a1a2e" }} className="navbar-username">
+              {firstName}
+            </span>
+            <button
+              onClick={handleLogout}
+              title="Log out"
+              aria-label="Log out"
+              style={{
+                background: "none", border: "none", cursor: "pointer", padding: 6,
+                borderRadius: 8, display: "flex", alignItems: "center", justifyContent: "center",
+              }}
+              onMouseEnter={e => e.currentTarget.style.background = "#F3F4F6"}
+              onMouseLeave={e => e.currentTarget.style.background = "none"}
+            >
+              <LogOut size={18} color="#6B7280" />
+            </button>
           </div>
 
           {/* Hamburger — hidden on desktop via CSS */}

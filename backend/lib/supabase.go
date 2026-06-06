@@ -51,6 +51,7 @@ type User struct {
 	Email        string    `json:"email"`
 	PasswordHash string    `json:"password_hash,omitempty"`
 	Name         string    `json:"name"`
+	Role         string    `json:"role,omitempty"`
 	CreatedAt    time.Time `json:"created_at,omitempty"`
 }
 

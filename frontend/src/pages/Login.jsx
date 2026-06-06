@@ -1,12 +1,35 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import BrainyMascot from "../components/BrainyMascot";
+import { useAuth } from "../lib/auth";
 import { HeartPulse, User, MessageCircle, ClipboardList, Home, Eye, EyeOff } from "lucide-react";
 
 const roles = [
   { id: "resident",    label: "Resident",    Icon: User },
   { id: "volunteer",   label: "Volunteer",   Icon: MessageCircle },
   { id: "coordinator", label: "Coordinator", Icon: ClipboardList },
+];
+
+// One-click demo accounts. Clicking a preset logs in (self-registering on first
+// use), so the hackathon demo can switch between user identities instantly.
+// These mirror the seeded users in backend/seed_users.sql — see DEMO_CREDENTIALS.md.
+const DEMO_PASSWORD = "password";
+const ROLE_STYLE = {
+  coordinator: { Icon: ClipboardList, color: "#D97706", bg: "#FEF3C7" },
+  volunteer:   { Icon: MessageCircle, color: "#0F766E", bg: "#CCFBF1" },
+  resident:    { Icon: User,          color: "#2563EB", bg: "#DBEAFE" },
+};
+const PRESETS = [
+  { role: "coordinator", name: "Coordinator Alice", email: "coordinator1@brainhack.sg" },
+  { role: "coordinator", name: "Coordinator Bob",   email: "coordinator2@brainhack.sg" },
+  { role: "volunteer",   name: "Volunteer Carol",   email: "volunteer1@brainhack.sg" },
+  { role: "volunteer",   name: "Volunteer Dave",    email: "volunteer2@brainhack.sg" },
+  { role: "volunteer",   name: "Volunteer Eve",     email: "volunteer3@brainhack.sg" },
+  { role: "resident",    name: "Resident Frank",    email: "resident1@brainhack.sg" },
+  { role: "resident",    name: "Resident Grace",    email: "resident2@brainhack.sg" },
+  { role: "resident",    name: "Resident Henry",    email: "resident3@brainhack.sg" },
+  { role: "resident",    name: "Resident Irene",    email: "resident4@brainhack.sg" },
+  { role: "resident",    name: "Resident James",    email: "resident5@brainhack.sg" },
 ];
 
 // ── SHARED LAYOUT WRAPPER ────────────────────────────────────
@@ -46,12 +69,49 @@ return (
 
 export default function Login() {
   const navigate = useNavigate();
+  const { login } = useAuth();
   const [screen, setScreen] = useState("login"); // "login" | "role" | "success"
   const [tab, setTab] = useState("login");        // "login" | "register"
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [showPw, setShowPw] = useState(false);
   const [selectedRole, setSelectedRole] = useState(null);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+
+  // One-click preset → authenticate and go straight into the app.
+  const handlePreset = async (preset) => {
+    if (busy) return;
+    setBusy(true);
+    setError("");
+    try {
+      await login({ email: preset.email, password: DEMO_PASSWORD, name: preset.name, role: preset.role });
+      navigate("/home");
+    } catch (e) {
+      setError(e.message || "Login failed");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  // Manual form → real login/register, then continue to the role screen.
+  const handleManual = async () => {
+    if (busy) return;
+    if (!email.trim() || !password) {
+      setError("Email and password are required.");
+      return;
+    }
+    setBusy(true);
+    setError("");
+    try {
+      await login({ email: email.trim(), password });
+      setScreen("role");
+    } catch (e) {
+      setError(e.message || "Login failed");
+    } finally {
+      setBusy(false);
+    }
+  };
 
   // ── SCREEN 1: LOGIN / REGISTER ───────────────────────────────
   if (screen === "login") {
@@ -117,30 +177,65 @@ export default function Login() {
           )}
           {tab === "register" && <div style={{ marginBottom: 20 }} />}
 
+          {error && (
+            <div style={{ background: "#FEF2F2", color: "#B91C1C", fontSize: 13, fontWeight: 600, borderRadius: 8, padding: "9px 12px", marginBottom: 14 }}>
+              {error}
+            </div>
+          )}
+
           {/* Login button */}
           <button
-            onClick={() => setScreen("role")}
-            style={{ width: "100%", background: "#F59E0B", color: "#fff", border: "none", borderRadius: 10, padding: "13px", fontFamily: "'Nunito', sans-serif", fontWeight: 800, fontSize: 15, cursor: "pointer", transition: "background 0.15s" }}
-            onMouseEnter={e => e.currentTarget.style.background = "#D97706"}
-            onMouseLeave={e => e.currentTarget.style.background = "#F59E0B"}
+            onClick={handleManual}
+            disabled={busy}
+            style={{ width: "100%", background: busy ? "#FCD34D" : "#F59E0B", color: "#fff", border: "none", borderRadius: 10, padding: "13px", fontFamily: "'Nunito', sans-serif", fontWeight: 800, fontSize: 15, cursor: busy ? "not-allowed" : "pointer", transition: "background 0.15s" }}
+            onMouseEnter={e => { if (!busy) e.currentTarget.style.background = "#D97706"; }}
+            onMouseLeave={e => { if (!busy) e.currentTarget.style.background = "#F59E0B"; }}
           >
-            {tab === "login" ? "Log In" : "Create Account"}
+            {busy ? "Signing in…" : tab === "login" ? "Log In" : "Create Account"}
           </button>
 
           {/* Divider */}
           <div style={{ display: "flex", alignItems: "center", gap: 12, margin: "20px 0" }}>
             <div style={{ flex: 1, height: 1, background: "#E5E7EB" }} />
-            <span style={{ fontSize: 11, fontWeight: 700, color: "#999", whiteSpace: "nowrap" }}>OR CONTINUE WITH</span>
+            <span style={{ fontSize: 11, fontWeight: 700, color: "#999", whiteSpace: "nowrap" }}>DEMO LOGINS</span>
             <div style={{ flex: 1, height: 1, background: "#E5E7EB" }} />
           </div>
 
-          {/* SingPass */}
-          <button style={{ width: "100%", background: "#fff", border: "1.5px solid #E5E7EB", borderRadius: 10, padding: "12px", fontFamily: "'Nunito', sans-serif", fontWeight: 800, fontSize: 15, cursor: "pointer", color: "#EF4444", letterSpacing: 0.5, transition: "background 0.15s" }}
-            onMouseEnter={e => e.currentTarget.style.background = "#FEF2F2"}
-            onMouseLeave={e => e.currentTarget.style.background = "#fff"}
-          >
-            <span style={{ color: "#999" }}></span>singpass
-          </button>
+          {/* One-click demo accounts (password is the same for all — see DEMO_CREDENTIALS.md) */}
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+            {PRESETS.map((p) => {
+              const s = ROLE_STYLE[p.role];
+              return (
+                <button
+                  key={p.email}
+                  onClick={() => handlePreset(p)}
+                  disabled={busy}
+                  title={`${p.name} · ${p.email}`}
+                  style={{
+                    display: "flex", alignItems: "center", gap: 8,
+                    width: "100%", background: "#fff", border: "1.5px solid #E5E7EB",
+                    borderRadius: 10, padding: "8px 10px", cursor: busy ? "not-allowed" : "pointer",
+                    fontFamily: "'Nunito', sans-serif", textAlign: "left", transition: "border-color 0.15s",
+                  }}
+                  onMouseEnter={e => { if (!busy) e.currentTarget.style.borderColor = s.color; }}
+                  onMouseLeave={e => e.currentTarget.style.borderColor = "#E5E7EB"}
+                >
+                  <span style={{
+                    width: 28, height: 28, borderRadius: "50%", background: s.bg, flexShrink: 0,
+                    display: "flex", alignItems: "center", justifyContent: "center",
+                  }}>
+                    <s.Icon size={15} color={s.color} />
+                  </span>
+                  <span style={{ display: "flex", flexDirection: "column", minWidth: 0 }}>
+                    <span style={{ fontWeight: 800, fontSize: 12.5, color: "#1a1a2e", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                      {p.name.replace(/^(Coordinator|Volunteer|Resident) /, "")}
+                    </span>
+                    <span style={{ fontSize: 11, fontWeight: 600, color: s.color, textTransform: "capitalize" }}>{p.role}</span>
+                  </span>
+                </button>
+              );
+            })}
+          </div>
         </div>
       </Layout>
     );
