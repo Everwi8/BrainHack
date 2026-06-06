@@ -113,7 +113,7 @@ The platform does four things:
 - [ ] TailwindCSS setup and theme config (colors, fonts matching BrainySG brand)
 - [ ] PWA manifest + service worker for installability
 - [x] Global nav bar component (Home / Map / Tasks / Feed / Chat tabs)
-- [x] React Router setup with all route placeholders
+- [x] React Router setup with route placeholders (note: `Volunteers.jsx` exists but has **no `/volunteers` route** wired in `App.jsx` yet; app starts at `/login`)
 - [x] **Home Page — Left Panel**
   - [x] "Top 3 crises near you" crisis card list
   - [x] Each card: icon, crisis name, status badge (Active/Warning/Resolved), location, distance, "View Map" link
@@ -134,7 +134,7 @@ The platform does four things:
   - [x] GPS active indicator with location display
 - [x] Notification banner component (e.g. "Heavy Rain Warning — Expected in North areas next 2 hours")
 - [ ] Loading states and error boundaries
-- [ ] Responsive layout (desktop + mobile)
+- [x] Responsive layout (desktop + mobile) — `src/responsive.css` with mobile/tablet/desktop breakpoints for NavBar (hamburger menu), Home, Timeline, Chat, Map, Login, CrisisDetail (Help page not yet covered)
 - [x] User avatar / profile icon in nav
 - [x] **Feed / Timeline Page** (`/timeline` → `pages/Timeline.jsx`)
   - [x] Three-column layout (left panel, center feed, right sidebar)
@@ -194,7 +194,7 @@ The platform does four things:
 
 - [x] NEA Weather API — `ingestion/nea.go` (2-hour forecasts + PSI; 5-min poll; upserts crisis rows on threshold breach)
 - [x] NEA PSI / PM2.5 API — included in `ingestion/nea.go`
-- [ ] NEA Dengue clusters API — no dedicated ingestion goroutine; `GET /api/data/dengue` returns DB rows but nothing currently writes them
+- [x] NEA Dengue clusters API — `GET /api/data/dengue` now fetches **live** from data.gov.sg (poll-download endpoint → signed GeoJSON URL → per-cluster centroid + case count, cached). On-demand fetch, so no dedicated ingestion goroutine is needed; does NOT depend on DB seeding.
 - [x] PUB MyWaters API — `ingestion/pub.go` (water-level stations; creates flood crises when level > 2.5 m)
 - [x] LTA DataMall API — `ingestion/lta.go` (train alerts; requires `LTA_API_KEY` env var; skips gracefully if key absent)
 - [x] MOH data — `handler/hospitals.go` (hardcoded 2025 MOH bed counts for 10 public hospitals; `ingestion/moh.go` is a no-op by design — no real-time MOH API available)
@@ -214,7 +214,7 @@ The platform does four things:
 - [x] `GET /api/data/weather` — fully implemented (`handler/data.go`; served from ingestion cache)
 - [x] `GET /api/data/floods` — fully implemented (`handler/data.go`)
 - [x] `GET /api/data/haze` — fully implemented, includes PSI advisory level logic (`handler/data.go`)
-- [x] `GET /api/data/dengue` — handler implemented (`handler/data.go`); no ingestion goroutine yet — returns DB rows when seeded
+- [x] `GET /api/data/dengue` — fully implemented with **live** data.gov.sg fetch (`handler/data.go`; poll-download → GeoJSON → cluster centroids, cached). Returns empty list (HTTP 200, not 503) on fetch failure since dengue is non-critical-path.
 - [x] `GET /api/data/transport` — fully implemented (`handler/data.go`)
 - [x] **`GET /api/feed`** — fully implemented (`handler/feed.go`; derives feed items from crises table, pins URGENT_ALERT by severity, supports `?limit=&offset=` pagination); frontend not yet wired to it
 
@@ -260,15 +260,16 @@ The platform does four things:
   - [x] Structured JSON output parsing for task cards (`ChatJSON` helper in `llm.go`)
   - [x] Retry logic for transient API failures (3 attempts, exponential backoff on 429/5xx/network)
   - [x] Reasoning disabled for JSON calls; enabled for prose answers (`reasoningParam` per-call)
-- [x] **Triage Logic** (`backend/lib/triage.go`, `triage_live.go`, `triage_mock.go`)
-  - [x] Threshold rules: water level ≥ 75% → flood warning (≥ 90% critical)
-  - [x] Threshold rules: PSI ≥ 100 → haze advisory (≥ 200 critical)
-  - [x] Threshold rules: dengue cases ≥ 10 in cluster → health alert (≥ 50 critical)
+- [x] **Triage Logic** (`backend/lib/triage.go`, `triage_live.go`, `datasource.go`, `geo.go`)
+  - [x] Threshold rules: water level ≥ 2.5 m → flood warning (≥ 3.5 m critical) — **now keys on real PUB metres** (data.gov.sg reports absolute metres, not capacity %; the old 75/90 % thresholds were dropped, matching ingestion's high-water mark)
+  - [x] Threshold rules: PSI ≥ 100 → haze advisory (≥ 200 critical) — real per-region PSI from the live feed
+  - [x] Threshold rules: dengue cases ≥ 10 in cluster → health alert (≥ 50 critical) — real case counts from the live dengue feed
   - [x] Cascade rules: heavy rain + high water (same area) → flash-flood risk
   - [x] Cascade rules: flood within 1.5 km of MRT → transport disruption
   - [x] Cascade rules: high PSI + dengue cluster → compound health risk
   - [x] Feed triage findings into Brainy's prompt context (live situational-awareness system message on session start)
-  - [x] `CrisisDataProvider` adapts live Supabase crisis rows to `DataProvider` readings (`triage_live.go`); auto-selected when `SUPABASE_URL` is set via `SelectDataProvider`
+  - [x] **Live data only** — `LiveDataProvider` (`triage_live.go`) reads the real cross-agency feeds via shared fetchers in `lib/datasource.go` (NEA weather + PSI, PUB water level, NEA dengue, LTA train alerts), cached 60 s per triage burst. **MockProvider removed** (`triage_mock.go` deleted; geo helpers moved to `geo.go`). Installed unconditionally by `SelectDataProvider` at startup; on a feed error that signal is absent for the run (no mock fallback).
+  - [x] `lib/datasource.go` is the single fetch+parse layer shared by Sanjey's `/api/data/*` handlers and triage (handlers refactored to thin cache-and-serve wrappers; API JSON shapes unchanged)
   - [x] `GET /api/triage` endpoint exposes the sorted report
 - [x] **Auto Task Card Generation** (`backend/lib/taskgen.go`)
   - [x] AI generates structured task card JSON from triage output (via `ChatJSON`); deterministic fallback if the LLM call fails
@@ -287,17 +288,26 @@ The platform does four things:
   - [x] `POST /api/chat/photo` — send image, return AI analysis + optional `crisis_card`
 - [x] Chat history storage — in-memory per session (`sessionStore sync.Map`, capped at 20 turns); DB persistence not needed for demo
 
+### Live Data Gaps (triage now runs on live feeds only — these fields can't be sourced and are flagged here per the "no mock data" decision)
+
+- [ ] **Weather rainfall (mm)** — the NEA 2-hour-forecast feed gives only forecast *text*, no rainfall amount, so `WeatherReading.RainfallMM` is always 0. Heavy-rain detection (and the flash-flood cascade) therefore relies on forecast keywords ("heavy"/"thundery") only. Fix: add the data.gov.sg `rainfall` realtime API to `datasource.go` for true mm.
+- [ ] **Haze PM2.5** — only PSI is fetched; `HazeReading.PM25` is unused/0. No rule needs it today, but it's not live.
+- [x] **`crisis_id` linkage on findings** — the live `/api/data/*` feeds carry no crisis-row id, so it's re-derived: `linkCrisisIDs` (`triage_live.go`) matches each reading back to an active crisis row by type + proximity (flood/dengue within 2 km), national row (haze), or name (transport line), stamping its id. The id then rides reading → finding → task card, so `ForwardTasks` writes FK-valid rows again under `FORWARD_TASKS=1`. Best-effort: unmatched readings stay unlinked (card not DB-persisted). Cascade findings still carry no id by design (synthetic, no single crisis row).
+- [ ] **Transport requires `LTA_API_KEY`** — without it `FetchTransport` returns an empty feed (no error), so transport findings silently never appear.
+- [x] **Dengue** — fully live (real case counts + polygon centroids); no gap.
+
 ### Tests
 
-- [x] `lib/triage_test.go` — mock data trips all threshold + cascade rules
-- [x] `lib/triage_live_test.go` — live provider mapping and helpers
+- [x] `lib/triage_test.go` — stubbed live feeds trip all threshold + cascade rules (`TestRunTriageRules`, `TestTriageContextNonEmpty`)
+- [x] `lib/triage_live_test.go` — `LiveDataProvider` feed→reading mapping via stubbed fetchers, full engine run, `crisis_id` re-linking (`TestLiveProviderLinksCrisisID`), `splitStations`, `attachFindingMeta`
 - [x] `lib/taskgen_test.go` — fallback cards, sanitise, dedup, empty-findings
 - [x] `lib/photo_triage_test.go` — 11-case `ObservationToFinding` table test (covers severity mapping, type filtering, hazard appending, source tagging)
 - [x] `extractJSON` (6 cases) + `stripJSONFences` (5 cases) in `photo_triage_test.go`
+- [x] All `go build ./...`, `go vet ./...`, `go test ./lib/...` green after the live-data refactor
 
-### Mock Data Needed
+### Mock Data
 
-- [x] Sample crisis data to inject into prompts for testing (without Sanjey's endpoints)
+- [x] ~~Sample crisis data to inject into prompts~~ — **removed**; triage runs on live feeds only (mock provider deleted)
 - [ ] Sample photos of flood/fire/haze scenarios committed as test fixtures (`backend/testdata/photos/`)
 
 ---
@@ -319,10 +329,10 @@ The platform does four things:
   - [x] AI-generated situation summary (Brainy brief driven by triage findings)
   - [x] Crisis metadata (type, severity, location, last updated)
   - [x] Water level / sensor reading display (if flood)
-  - [x] Task card list with status badges (Pending / In Progress / Resolved)
-  - [x] Volunteer count ("12 helpers")
-  - [x] "I Want to Help" button → links to James's volunteer flow
-  - [x] Link to group chat for this crisis
+  - [x] Task card list with status badges — note: uses `urgent / open / in_progress / done` (filter tabs All/Open/In Progress/Done), **not** the documented `pending / assigned / in_progress / resolved` enum
+  - [x] Volunteer count ("12 helpers") — demo heuristic: regex-parsed from `crisis.summary` text; mini-map "helpers nearby" markers are `mockHelpers`, not live volunteer data
+  - [x] "I Want to Help" button → navigates to `/volunteers?crisis_id=…&task_id=…` — **dead link**: no `/volunteers` route in `App.jsx` yet (waiting on James's page)
+  - [x] Link to group chat for this crisis — "Group Chat" button also navigates to `/volunteers?crisis_id=…` (same dead route)
 - [x] **Map on Home Page**
   - [x] "View SG Map" button links to full map page
 
@@ -373,13 +383,13 @@ The platform does four things:
 ### Backend
 
 - [ ] **Speech-to-Text**
-  - [ ] Accept audio upload via `POST /api/transcribe`
+  - [ ] `POST /api/voice` route registered in `main.go` (auth-required) but handler `Voice` is a no-op stub — actual route is `/api/voice`, not `/api/transcribe` from the contract table
   - [ ] Integration with Google STT or Whisper API
   - [ ] Return transcribed text
   - [ ] Forward transcribed text to Perrin's `POST /api/chat` as standard message
 - [x] **Volunteer System** (routes registered; handlers are no-ops)
-  - [x] `POST /api/volunteers` — route registered (`handler/volunteers.go` stub)
-  - [x] `GET /api/volunteers?crisis_id=` — route registered (stub)
+  - [x] `POST /api/volunteers` — route registered, **auth-required** (`handler/volunteers.go` `RegisterVolunteer` stub)
+  - [x] `GET /api/volunteers?crisis_id=` — route registered (`ListVolunteers` stub, public)
   - [ ] `POST /api/volunteers/match` — AI/logic-based matching (skill + distance + availability scoring)
   - [ ] `PATCH /api/volunteers/:id` — update availability
 - [ ] **Group Chat**
@@ -407,9 +417,9 @@ The platform does four things:
 
 ## Shared / Cross-Cutting
 
-- [x] Crisis type enum — `flood, fire, haze, fallen_tree, road_accident, building_damage, medical, crowd, transport, dengue, cascade` (agreed in code; consistent across `PhotoObservation`, `TriageFinding`, `InlineCrisisCard`)
+- [ ] Crisis type enum — `flood, fire, haze, fallen_tree, road_accident, building_damage, medical, crowd, transport, dengue, cascade` consistent across `PhotoObservation`, `TriageFinding`, `InlineCrisisCard`, **but** `ingestion/lta.go` writes crises with `Type: "mrt"` (not `transport`) — reconcile before treating the enum as agreed
 - [x] Severity enum — `low, warning, critical` (constants in `lib/triage.go`; used consistently across backend and frontend)
-- [ ] Task status enum — `pending, assigned, in_progress, resolved` (used in code but not formally agreed across all owners)
+- [ ] Task status enum — **not agreed / inconsistent**: backend `handler/tasks.go` and the contract use `pending, assigned, in_progress, resolved`, but Jerald's `CrisisDetail.jsx` renders `urgent, open, in_progress, done`. Needs reconciling before tasks flow end-to-end.
 - [ ] Agree on full API response JSON shapes (some endpoints evolved from the original contract table)
 - [x] Brainy mascot image asset (PNG/SVG) available to all
 - [ ] BrainySG logo asset
@@ -439,6 +449,6 @@ The platform does four things:
 - Hospital bed data is **annual/static**, not live. Displayed as "last reported" values from `handler/hospitals.go` (2025 MOH figures for 10 public hospitals).
 - All frontend work can proceed with mock data before API endpoints are fully wired; `src/lib/mockData.js` provides seed data for the map, crisis detail, and timeline pages.
 - **LLM setup:** text model is `nvidia/nemotron-3-super-120b-a12b:free`, vision model is `nvidia/nemotron-nano-12b-v2-vl:free`, both via OpenRouter (`LLM_BASE_URL=https://openrouter.ai/api/v1`). Gemini Flash is no longer used. See `plan-perrin.md` for model rationale and the two-quota-bucket strategy.
-- **NEA dengue gap:** the only ingestion path not implemented — `GET /api/data/dengue` handler exists but no goroutine writes dengue rows. Low priority for demo since triage mock data covers dengue scenarios.
+- **Dengue:** `GET /api/data/dengue` is now fully live — it fetches from data.gov.sg on demand (poll-download → GeoJSON → cluster centroids, cached), so no ingestion goroutine is required. Note: this live data is **not** written into the `crises` table, so dengue does not yet surface in the crisis map/feed/triage unless seeded separately.
 - **Timeline live data:** `GET /api/feed` is implemented in `handler/feed.go` but `Timeline.jsx` still reads from `MOCK_FEED`. One-line fix to wire them up.
 - Update the pitch deck: Flask → Go + Gin, Gemini Flash → Nemotron via OpenRouter.

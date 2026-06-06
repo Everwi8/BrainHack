@@ -1,336 +1,292 @@
-// Perrin — live data provider for triage. Sanjey's ingestion layer (NEA/PUB/LTA)
-// doesn't expose the granular /api/data/* endpoints the original plan assumed;
-// instead it aggregates every signal into the crises table (served by
-// GET /api/crises / lib.DB.GetCrises). CrisisDataProvider adapts those rows back
-// into the per-signal readings the triage rules expect, so RunTriage runs on
-// real ingested data with no rule changes.
+// Perrin — live data provider for triage. Reads the real cross-agency feeds via
+// the shared fetchers in datasource.go (NEA weather + PSI, PUB water level, NEA
+// dengue, LTA train alerts) and maps them into the per-signal readings the
+// triage rules expect. No mock data and no severity-bucket guesswork: every
+// metric here is a real reading off a live feed.
 //
-// Two boundary mismatches are handled here:
-//   - severity: Sanjey emits low/medium/high/critical; we map those to the
-//     metric each rule keys on (water %, PSI, case count) so the same thresholds
-//     fire. Triage's own output stays low/warning/critical (the frontend's enum).
-//   - shape: a flood crisis from PUB is a water reading, but from NEA it's a
-//     rain forecast (same Type="flood"), so we split on Source.
-//
-// Real numbers are parsed out of the crisis title/description when present (PUB
-// metres, "PSI 142", "23 cases"); otherwise we fall back to a severity-derived
-// value. On a live fetch error we serve the last good snapshot, and failing that
-// the mock data — triage and chat must never break because the DB is down.
+// One run of RunTriage calls all five reading methods back-to-back, so the five
+// feeds are fetched once and cached for a short TTL to avoid hammering the
+// upstream APIs (and to keep a single triage burst consistent). On a feed error
+// that signal degrades to empty for the run — triage and chat must never break
+// because one upstream is down — and the error is logged.
 package lib
 
 import (
 	"log"
-	"os"
-	"regexp"
-	"strconv"
 	"strings"
 	"sync"
 	"time"
 )
 
-// crisisProviderTTL bounds how often a single triage burst re-hits Supabase.
-// RunTriage calls all five reading methods back-to-back; the snapshot cache
-// turns that into one fetch.
-const crisisProviderTTL = 60 * time.Second
+// liveProviderTTL bounds how often a triage burst re-hits the upstream feeds.
+const liveProviderTTL = 60 * time.Second
 
-// CrisisDataProvider derives triage readings from Sanjey's live crises table.
-type CrisisDataProvider struct {
-	mu       sync.Mutex
-	snapshot []Crisis
-	fetched  time.Time
-	ttl      time.Duration
-	fallback *MockProvider // used only when a live fetch fails with no cached snapshot
+// Fetchers are indirected through package vars so tests can stub the network.
+var (
+	weatherFetcher   = FetchWeather
+	waterFetcher     = FetchWaterLevels
+	hazeFetcher      = FetchHaze
+	dengueFetcher    = FetchDengue
+	transportFetcher = FetchTransport
+)
+
+// crisesSource supplies the active crisis rows used to re-link a live reading to
+// a crisis_id (see crisisMatcher). Indirected so tests can stub it without a DB.
+var crisesSource = liveCrises
+
+func liveCrises() ([]Crisis, error) {
+	if DB == nil {
+		return nil, nil
+	}
+	return DB.GetCrises()
 }
 
-// NewCrisisDataProvider builds the live provider backed by lib.DB.
-func NewCrisisDataProvider() *CrisisDataProvider {
-	return &CrisisDataProvider{ttl: crisisProviderTTL, fallback: NewMockProvider()}
+// How close a live reading must be to a crisis row (km) to be linked to it.
+const (
+	floodMatchKm  = 2.0
+	dengueMatchKm = 2.0
+)
+
+// liveSnapshot is one consistent pull of all five signals.
+type liveSnapshot struct {
+	weather   []WeatherReading
+	floods    []FloodReading
+	haze      []HazeReading
+	dengue    []DengueCluster
+	transport []TransportDisruption
 }
 
-// load returns the current crises, cached for ttl. On error it serves the last
-// good snapshot if there is one; otherwise it returns the error so callers can
-// fall back to mock data.
-func (p *CrisisDataProvider) load() ([]Crisis, error) {
+// LiveDataProvider derives triage readings from the live cross-agency feeds.
+type LiveDataProvider struct {
+	mu      sync.Mutex
+	snap    *liveSnapshot
+	fetched time.Time
+	ttl     time.Duration
+}
+
+// NewLiveDataProvider builds the live provider.
+func NewLiveDataProvider() *LiveDataProvider {
+	return &LiveDataProvider{ttl: liveProviderTTL}
+}
+
+// load returns the cached snapshot if fresh, else pulls every feed once. A feed
+// error degrades that signal to empty (logged) rather than failing the whole run.
+func (p *LiveDataProvider) load() *liveSnapshot {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
-	if p.snapshot != nil && time.Since(p.fetched) < p.ttl {
-		return p.snapshot, nil
+	if p.snap != nil && time.Since(p.fetched) < p.ttl {
+		return p.snap
 	}
-	if DB == nil {
-		if p.snapshot != nil {
-			return p.snapshot, nil
+
+	snap := &liveSnapshot{}
+
+	if wx, err := weatherFetcher(); err != nil {
+		log.Printf("[triage/live] weather feed: %v — skipping this run", err)
+	} else {
+		for _, f := range wx.Readings {
+			snap.weather = append(snap.weather, WeatherReading{
+				Area:     f.Area,
+				Forecast: f.Forecast,
+				// RainfallMM not available from the 2-hour forecast feed (gap —
+				// see plan.md); heavy-rain detection falls back to forecast text.
+			})
 		}
-		return nil, errNoDB
 	}
-	cs, err := DB.GetCrises()
-	if err != nil {
-		if p.snapshot != nil {
-			return p.snapshot, nil // last-known-good
+
+	if wl, err := waterFetcher(); err != nil {
+		log.Printf("[triage/live] water-level feed: %v — skipping this run", err)
+	} else {
+		for _, s := range wl.Stations {
+			snap.floods = append(snap.floods, FloodReading{
+				SensorID:    s.ID,
+				Location:    s.Name,
+				Lat:         s.Lat,
+				Lng:         s.Lng,
+				WaterLevelM: s.LevelM,
+			})
 		}
-		return nil, err
 	}
-	p.snapshot = cs
+
+	if hz, err := hazeFetcher(); err != nil {
+		log.Printf("[triage/live] psi feed: %v — skipping this run", err)
+	} else {
+		p := hz.PSI24h
+		for _, r := range []struct {
+			region string
+			psi    float64
+		}{
+			{"north", p.North}, {"south", p.South}, {"east", p.East},
+			{"west", p.West}, {"central", p.Central},
+		} {
+			snap.haze = append(snap.haze, HazeReading{Region: r.region, PSI: int(r.psi)})
+		}
+	}
+
+	if dg, err := dengueFetcher(); err != nil {
+		log.Printf("[triage/live] dengue feed: %v — skipping this run", err)
+	} else {
+		for _, c := range dg.Clusters {
+			snap.dengue = append(snap.dengue, DengueCluster{
+				Locality: c.Area, Lat: c.Lat, Lng: c.Lng, Cases: c.Cases,
+			})
+		}
+	}
+
+	if tr, err := transportFetcher(); err != nil {
+		log.Printf("[triage/live] transport feed: %v — skipping this run", err)
+	} else {
+		status := "delayed"
+		if tr.Status == "disrupted" {
+			status = "disrupted"
+		}
+		for _, a := range tr.Alerts {
+			snap.transport = append(snap.transport, TransportDisruption{
+				Line:        a.Line,
+				Stations:    splitStations(a.Stations),
+				Status:      status,
+				Description: a.Message,
+			})
+		}
+	}
+
+	// Re-link each reading to a crisis row so the generated task cards carry a
+	// crisis_id (the raw feeds don't). Best-effort: a lookup failure just leaves
+	// the ids empty, same as an unmatched reading.
+	if crises, err := crisesSource(); err != nil {
+		log.Printf("[triage/live] crisis_id lookup: %v — findings will have no crisis_id", err)
+	} else {
+		linkCrisisIDs(snap, newCrisisMatcher(crises))
+	}
+
+	p.snap = snap
 	p.fetched = time.Now()
-	return cs, nil
+	return snap
 }
 
-var errNoDB = &providerError{"lib.DB not initialised"}
+func (p *LiveDataProvider) Weather() ([]WeatherReading, error)        { return p.load().weather, nil }
+func (p *LiveDataProvider) Floods() ([]FloodReading, error)           { return p.load().floods, nil }
+func (p *LiveDataProvider) Haze() ([]HazeReading, error)              { return p.load().haze, nil }
+func (p *LiveDataProvider) Dengue() ([]DengueCluster, error)          { return p.load().dengue, nil }
+func (p *LiveDataProvider) Transport() ([]TransportDisruption, error) { return p.load().transport, nil }
 
-type providerError struct{ msg string }
+// ---------------------------------------------------------------------------
+// crisis_id re-linking
+// ---------------------------------------------------------------------------
+//
+// The raw /api/data feeds carry no crisis-row id, but ingestion still populates
+// the crises table, so we match each live reading back to a crisis row (by type
+// + proximity/name) and stamp its id onto the reading. That id then rides the
+// chain reading → finding → task card, letting ForwardTasks write FK-valid task
+// rows. Best-effort: an unmatched reading keeps an empty CrisisID and its task
+// card simply isn't DB-persisted, exactly as in the unlinked case.
 
-func (e *providerError) Error() string { return e.msg }
+type crisisMatcher struct {
+	byType map[string][]Crisis
+}
 
-// byType returns the active crises of a given type.
-func byType(crises []Crisis, t string) []Crisis {
-	var out []Crisis
+func newCrisisMatcher(crises []Crisis) *crisisMatcher {
+	m := &crisisMatcher{byType: make(map[string][]Crisis)}
 	for _, c := range crises {
-		if c.Type == t {
-			out = append(out, c)
+		m.byType[c.Type] = append(m.byType[c.Type], c)
+	}
+	return m
+}
+
+// nearest returns the id of the crisis of the given type closest to (lat,lng)
+// within maxKm. Rows without coordinates are ignored. "" if none qualify.
+func (m *crisisMatcher) nearest(ctype string, lat, lng, maxKm float64) string {
+	best, bestKm := "", maxKm
+	for _, c := range m.byType[ctype] {
+		if c.Lat == 0 && c.Lng == 0 {
+			continue
+		}
+		if d := haversineKm(lat, lng, c.Lat, c.Lng); d <= bestKm {
+			best, bestKm = c.ID, d
+		}
+	}
+	return best
+}
+
+// byName returns the id of the first crisis of the given type whose location
+// name or title contains needle (case-insensitive). "" if none / empty needle.
+func (m *crisisMatcher) byName(ctype, needle string) string {
+	needle = strings.ToLower(strings.TrimSpace(needle))
+	if needle == "" {
+		return ""
+	}
+	for _, c := range m.byType[ctype] {
+		if strings.Contains(strings.ToLower(c.LocationName+" "+c.Title), needle) {
+			return c.ID
+		}
+	}
+	return ""
+}
+
+// first returns the id of any crisis of the given type (used for national-scope
+// signals like haze where there is a single aggregate row). "" if none.
+func (m *crisisMatcher) first(ctype string) string {
+	if rows := m.byType[ctype]; len(rows) > 0 {
+		return rows[0].ID
+	}
+	return ""
+}
+
+// linkCrisisIDs stamps each reading in the snapshot with the id of the crisis
+// row it best matches. Mutates snap in place.
+func linkCrisisIDs(snap *liveSnapshot, m *crisisMatcher) {
+	for i := range snap.floods {
+		f := &snap.floods[i]
+		f.CrisisID = m.nearest("flood", f.Lat, f.Lng, floodMatchKm)
+	}
+	for i := range snap.dengue {
+		d := &snap.dengue[i]
+		id := m.nearest("dengue", d.Lat, d.Lng, dengueMatchKm)
+		if id == "" {
+			id = m.byName("dengue", d.Locality)
+		}
+		d.CrisisID = id
+	}
+	hazeID := m.first("haze") // haze is upserted as one national row
+	for i := range snap.haze {
+		snap.haze[i].CrisisID = hazeID
+	}
+	for i := range snap.transport {
+		t := &snap.transport[i]
+		t.CrisisID = m.byName("mrt", t.Line) // crisis LocationName is e.g. "EWL Line"
+	}
+}
+
+// splitStations parses an LTA affected-stations string ("Tanah Merah, Simei" or
+// "Tanah Merah,Simei") into a clean slice; empty input yields no stations.
+func splitStations(s string) []string {
+	var out []string
+	for _, part := range strings.Split(s, ",") {
+		if part = strings.TrimSpace(part); part != "" {
+			out = append(out, part)
 		}
 	}
 	return out
 }
 
-func (p *CrisisDataProvider) Weather() ([]WeatherReading, error) {
-	crises, err := p.load()
-	if err != nil {
-		log.Printf("[triage/live] weather: %v — falling back to mock", err)
-		return p.fallback.Weather()
-	}
-	var out []WeatherReading
-	for _, c := range byType(crises, "flood") {
-		// NEA severe-weather rows are rain forecasts; PUB rows are water levels.
-		if !strings.EqualFold(c.Source, "nea") {
-			continue
-		}
-		out = append(out, WeatherReading{
-			Area:       c.LocationName,
-			Forecast:   forecastFromCrisis(c),
-			RainfallMM: 30, // NEA only upserts a crisis for severe weather → treat as heavy
-			CrisisID:   c.ID,
-		})
-	}
-	return out, nil
-}
+// ---------------------------------------------------------------------------
+// Default provider (no data until SelectDataProvider installs the live one)
+// ---------------------------------------------------------------------------
 
-func (p *CrisisDataProvider) Floods() ([]FloodReading, error) {
-	crises, err := p.load()
-	if err != nil {
-		log.Printf("[triage/live] floods: %v — falling back to mock", err)
-		return p.fallback.Floods()
-	}
-	var out []FloodReading
-	for _, c := range byType(crises, "flood") {
-		if strings.EqualFold(c.Source, "nea") {
-			continue // that's a rain forecast, handled by Weather()
-		}
-		out = append(out, FloodReading{
-			SensorID:      c.ExternalID,
-			Location:      c.LocationName,
-			Lat:           c.Lat,
-			Lng:           c.Lng,
-			WaterLevelPct: floodPctForSeverity(c.Severity),
-			CrisisID:      c.ID,
-		})
-	}
-	return out, nil
-}
+// emptyProvider yields no readings. It is the package default so triage is inert
+// until SelectDataProvider wires in the live feeds at startup, and so unit tests
+// that don't install a provider don't accidentally hit the network.
+type emptyProvider struct{}
 
-func (p *CrisisDataProvider) Haze() ([]HazeReading, error) {
-	crises, err := p.load()
-	if err != nil {
-		log.Printf("[triage/live] haze: %v — falling back to mock", err)
-		return p.fallback.Haze()
-	}
-	var out []HazeReading
-	for _, c := range byType(crises, "haze") {
-		psi := parseInt(psiRe, c.Title+" "+c.Description)
-		if psi == 0 {
-			psi = psiForSeverity(c.Severity)
-		}
-		out = append(out, HazeReading{
-			Region:   regionFromName(c.LocationName),
-			PSI:      psi,
-			CrisisID: c.ID,
-		})
-	}
-	return out, nil
-}
+func (emptyProvider) Weather() ([]WeatherReading, error)        { return nil, nil }
+func (emptyProvider) Floods() ([]FloodReading, error)           { return nil, nil }
+func (emptyProvider) Haze() ([]HazeReading, error)              { return nil, nil }
+func (emptyProvider) Dengue() ([]DengueCluster, error)          { return nil, nil }
+func (emptyProvider) Transport() ([]TransportDisruption, error) { return nil, nil }
 
-func (p *CrisisDataProvider) Dengue() ([]DengueCluster, error) {
-	crises, err := p.load()
-	if err != nil {
-		log.Printf("[triage/live] dengue: %v — falling back to mock", err)
-		return p.fallback.Dengue()
-	}
-	var out []DengueCluster
-	for _, c := range byType(crises, "dengue") {
-		cases := parseInt(caseRe, c.Title+" "+c.Description)
-		if cases == 0 {
-			cases = dengueCasesForSeverity(c.Severity)
-		}
-		out = append(out, DengueCluster{
-			Locality: c.LocationName,
-			Lat:      c.Lat,
-			Lng:      c.Lng,
-			Cases:    cases,
-			CrisisID: c.ID,
-		})
-	}
-	return out, nil
-}
-
-func (p *CrisisDataProvider) Transport() ([]TransportDisruption, error) {
-	crises, err := p.load()
-	if err != nil {
-		log.Printf("[triage/live] transport: %v — falling back to mock", err)
-		return p.fallback.Transport()
-	}
-	var out []TransportDisruption
-	for _, c := range byType(crises, "mrt") {
-		status := "delayed"
-		if c.Severity == "high" || c.Severity == "critical" {
-			status = "disrupted"
-		}
-		out = append(out, TransportDisruption{
-			Line:        strings.TrimSpace(strings.TrimSuffix(c.LocationName, "Line")),
-			Stations:    stationsFromDescription(c.Description, c.LocationName),
-			Status:      status,
-			Description: c.Description,
-			CrisisID:    c.ID,
-		})
-	}
-	return out, nil
-}
-
-// --- severity → metric mappings (boundary translation) ---------------------
-//
-// Sanjey's ingestion only upserts a crisis once a source-side threshold is met,
-// so even a "medium" row is a genuine event. We map each severity onto a metric
-// value that re-trips the matching triage threshold (warn/critical).
-
-func floodPctForSeverity(sev string) float64 {
-	switch sev {
-	case "critical":
-		return 97
-	case "high":
-		return 92
-	case "medium":
-		return 80
-	default:
-		return 70 // below floodWarnPct — won't raise a finding on its own
-	}
-}
-
-func psiForSeverity(sev string) int {
-	switch sev {
-	case "critical":
-		return 320
-	case "high":
-		return 220
-	case "medium":
-		return 120
-	default:
-		return 80
-	}
-}
-
-func dengueCasesForSeverity(sev string) int {
-	switch sev {
-	case "critical":
-		return 80
-	case "high":
-		return 40
-	case "medium":
-		return 15
-	default:
-		return 8
-	}
-}
-
-// --- parsing helpers -------------------------------------------------------
-
-var (
-	psiRe      = regexp.MustCompile(`(?i)PSI\s+(\d+)`)
-	caseRe     = regexp.MustCompile(`(\d+)\s+case`)
-	forecastRe = regexp.MustCompile(`\(([^)]+)\)\s*$`)
-)
-
-func parseInt(re *regexp.Regexp, s string) int {
-	m := re.FindStringSubmatch(s)
-	if len(m) < 2 {
-		return 0
-	}
-	n, _ := strconv.Atoi(m[1])
-	return n
-}
-
-// forecastFromCrisis pulls the forecast phrase out of an NEA weather title like
-// "Severe Weather — Pasir Ris (Heavy Thundery Showers)", falling back to a
-// generic heavy-rain label so isHeavyRain still trips the flash-flood cascade.
-func forecastFromCrisis(c Crisis) string {
-	if m := forecastRe.FindStringSubmatch(c.Title); len(m) == 2 {
-		return m[1]
-	}
-	return "Heavy Thundery Showers"
-}
-
-// regionFromName maps a crisis location to one of NEA's PSI regions when the
-// name contains it (e.g. "West Region" → "west"); otherwise "national", which
-// still surfaces a haze finding (it just won't drive a region-bounded cascade).
-func regionFromName(name string) string {
-	low := strings.ToLower(name)
-	for _, r := range []string{"north", "south", "east", "west", "central"} {
-		if strings.Contains(low, r) {
-			return r
-		}
-	}
-	return "national"
-}
-
-// stationsFromDescription extracts an affected-station list from an LTA
-// description ("...affecting stations: A,B."), defaulting to the line name.
-func stationsFromDescription(desc, fallback string) []string {
-	if i := strings.Index(strings.ToLower(desc), "stations:"); i >= 0 {
-		rest := desc[i+len("stations:"):]
-		if j := strings.IndexByte(rest, '.'); j >= 0 {
-			rest = rest[:j]
-		}
-		var stations []string
-		for _, s := range strings.Split(rest, ",") {
-			if s = strings.TrimSpace(s); s != "" {
-				stations = append(stations, s)
-			}
-		}
-		if len(stations) > 0 {
-			return stations
-		}
-	}
-	return []string{fallback}
-}
-
-// --- provider selection ----------------------------------------------------
-
-// SelectDataProvider chooses the triage data source from the environment and
-// installs it. Call once after lib.Init(). TRIAGE_PROVIDER overrides the
-// default: "live" (always real), "mock" (always demo data), or unset/"auto"
-// (live when SUPABASE_URL is configured, else mock so offline demos still work).
+// SelectDataProvider installs the live data source. Call once after lib.Init().
+// Triage now runs only on live cross-agency feeds — there is no mock fallback.
 func SelectDataProvider() {
-	switch strings.ToLower(strings.TrimSpace(os.Getenv("TRIAGE_PROVIDER"))) {
-	case "mock":
-		SetDataProvider(NewMockProvider())
-		log.Println("[triage] data provider: mock (forced)")
-	case "live":
-		SetDataProvider(NewCrisisDataProvider())
-		log.Println("[triage] data provider: live crises (forced)")
-	default:
-		if os.Getenv("SUPABASE_URL") != "" {
-			SetDataProvider(NewCrisisDataProvider())
-			log.Println("[triage] data provider: live crises (SUPABASE_URL set)")
-		} else {
-			// package default is already mock; log for clarity
-			log.Println("[triage] data provider: mock (SUPABASE_URL unset)")
-		}
-	}
+	SetDataProvider(NewLiveDataProvider())
+	log.Println("[triage] data provider: live cross-agency feeds")
 }

@@ -3,11 +3,11 @@
 // cascade rules, and produces a TriageReport. The findings also feed Brainy's
 // chat prompt so answers reflect the current situation.
 //
-// Sanjey's ingestion layer landed: instead of granular /api/data/* endpoints it
-// aggregates everything into the crises table (GET /api/crises). The live
-// CrisisDataProvider (triage_live.go) derives the readings below from those rows
-// and swaps in via SetDataProvider — see SelectDataProvider. MockProvider stays
-// as the offline/demo fallback. The rules here are unchanged either way.
+// The readings below come from the live cross-agency feeds: LiveDataProvider
+// (triage_live.go) pulls NEA weather + PSI, PUB water level, NEA dengue, and LTA
+// train alerts via the shared fetchers in datasource.go, and is installed by
+// SelectDataProvider at startup. There is no mock data path — when a feed is
+// unavailable that signal is simply absent for the run.
 package lib
 
 import (
@@ -22,10 +22,10 @@ import (
 // Data shapes (what the DataProvider returns)
 // ---------------------------------------------------------------------------
 
-// CrisisID, where set, links a reading back to the originating crisis row in
-// Sanjey's store (populated by the live provider). It lets findings — and the
-// task cards derived from them — reference a real crisis_id FK. The mock
-// provider leaves it empty.
+// CrisisID, where set, links a reading back to a crisis row so findings (and the
+// task cards derived from them) can reference a real crisis_id FK. The live
+// /api/data feeds carry no crisis row id, so it is currently always empty — see
+// the "live data gaps" note in plan.md.
 
 // WeatherReading is a per-area forecast/nowcast snapshot.
 type WeatherReading struct {
@@ -35,14 +35,16 @@ type WeatherReading struct {
 	CrisisID   string  `json:"crisis_id,omitempty"`
 }
 
-// FloodReading is a single PUB water-level sensor reading.
+// FloodReading is a single PUB water-level sensor reading. data.gov.sg reports
+// absolute level in metres (it does not publish canal capacity), so triage keys
+// on metres rather than a % of capacity.
 type FloodReading struct {
-	SensorID      string  `json:"sensor_id"`
-	Location      string  `json:"location"`
-	Lat           float64 `json:"lat"`
-	Lng           float64 `json:"lng"`
-	WaterLevelPct float64 `json:"water_level_pct"` // % of drain/canal capacity
-	CrisisID      string  `json:"crisis_id,omitempty"`
+	SensorID    string  `json:"sensor_id"`
+	Location    string  `json:"location"`
+	Lat         float64 `json:"lat"`
+	Lng         float64 `json:"lng"`
+	WaterLevelM float64 `json:"water_level_m"` // absolute water level, metres
+	CrisisID    string  `json:"crisis_id,omitempty"`
 }
 
 // HazeReading is a regional PSI/PM2.5 reading.
@@ -71,8 +73,9 @@ type TransportDisruption struct {
 	CrisisID    string   `json:"crisis_id,omitempty"`
 }
 
-// DataProvider supplies the latest cross-agency readings. The mock implements
-// it now; a real implementation later wraps Sanjey's /api/data/* endpoints.
+// DataProvider supplies the latest cross-agency readings. LiveDataProvider
+// (triage_live.go) is the production implementation, backed by the live feeds;
+// emptyProvider is the inert default until it is installed.
 type DataProvider interface {
 	Weather() ([]WeatherReading, error)
 	Floods() ([]FloodReading, error)
@@ -114,8 +117,8 @@ type TriageReport struct {
 // Thresholds — tuned for a believable demo. Centralised so they are easy to
 // explain and adjust.
 const (
-	floodWarnPct  = 75.0 // canal/drain capacity
-	floodCritPct  = 90.0
+	floodWarnM    = 2.5 // PUB water level (metres); matches ingestion's high-water mark
+	floodCritM    = 3.5
 	hazeWarnPSI   = 100 // NEA "unhealthy"
 	hazeCritPSI   = 200 // NEA "very unhealthy"
 	dengueWarnCnt = 10  // NEA yellow cluster
@@ -129,7 +132,7 @@ const (
 
 var (
 	providerMu     sync.RWMutex
-	activeProvider DataProvider = NewMockProvider()
+	activeProvider DataProvider = emptyProvider{}
 )
 
 // SetDataProvider swaps the data source (e.g. mock → live) at runtime.
@@ -194,22 +197,22 @@ func floodFindings(floods []FloodReading) []TriageFinding {
 	var out []TriageFinding
 	for _, f := range floods {
 		switch {
-		case f.WaterLevelPct >= floodCritPct:
+		case f.WaterLevelM >= floodCritM:
 			out = append(out, TriageFinding{
 				Type:     "flood",
 				Severity: SeverityCritical,
 				Title:    "Flash flood risk: " + f.Location,
-				Detail:   fmt.Sprintf("Water level at %.0f%% of capacity — flooding likely. Avoid the area and move to higher ground.", f.WaterLevelPct),
+				Detail:   fmt.Sprintf("Water level at %.1fm — flooding likely. Avoid the area and move to higher ground.", f.WaterLevelM),
 				Location: f.Location,
 				Sources:  []string{"PUB"},
 				CrisisID: f.CrisisID,
 			})
-		case f.WaterLevelPct >= floodWarnPct:
+		case f.WaterLevelM >= floodWarnM:
 			out = append(out, TriageFinding{
 				Type:     "flood",
 				Severity: SeverityWarning,
 				Title:    "Rising water: " + f.Location,
-				Detail:   fmt.Sprintf("Water level at %.0f%% of capacity. Stay alert and avoid low-lying paths nearby.", f.WaterLevelPct),
+				Detail:   fmt.Sprintf("Water level at %.1fm. Stay alert and avoid low-lying paths nearby.", f.WaterLevelM),
 				Location: f.Location,
 				Sources:  []string{"PUB"},
 				CrisisID: f.CrisisID,
@@ -314,7 +317,7 @@ func cascadeFindings(weather []WeatherReading, floods []FloodReading, haze []Haz
 	// Pairing rain to the flood's own locality (rather than any heavy rain
 	// anywhere) keeps the warning geographically honest.
 	for _, f := range floods {
-		if f.WaterLevelPct < floodWarnPct {
+		if f.WaterLevelM < floodWarnM {
 			continue
 		}
 		rain := rainForArea(weather, f.Location)
@@ -325,8 +328,8 @@ func cascadeFindings(weather []WeatherReading, floods []FloodReading, haze []Haz
 			Type:     "cascade",
 			Severity: SeverityCritical,
 			Title:    "Flash-flood cascade: " + f.Location,
-			Detail: fmt.Sprintf("%s forecast over %s while %s is already at %.0f%% capacity — flash flooding likely within the hour. Avoid underpasses and low-lying roads.",
-				rain.Forecast, rain.Area, f.Location, f.WaterLevelPct),
+			Detail: fmt.Sprintf("%s forecast over %s while %s is already at %.1fm — flash flooding likely within the hour. Avoid underpasses and low-lying roads.",
+				rain.Forecast, rain.Area, f.Location, f.WaterLevelM),
 			Location: f.Location,
 			Sources:  []string{"NEA", "PUB"},
 			Cascade:  true,
@@ -335,7 +338,7 @@ func cascadeFindings(weather []WeatherReading, floods []FloodReading, haze []Haz
 
 	// 2) Flood near an MRT station → transport disruption risk.
 	for _, f := range floods {
-		if f.WaterLevelPct < floodWarnPct {
+		if f.WaterLevelM < floodWarnM {
 			continue
 		}
 		for _, st := range nearbyMRT(f.Lat, f.Lng, floodMRTKm) {
