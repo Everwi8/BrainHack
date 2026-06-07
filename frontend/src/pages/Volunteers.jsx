@@ -1,48 +1,34 @@
 // James — volunteer group chat page (tabbed by crisis, voice recording, task status tracker)
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Camera, Mic, Paperclip, Play, X } from "lucide-react";
+import { Camera, Image as ImageIcon, Mic, Play, X } from "lucide-react";
 import Navbar from "../components/layout/NavBar";
 import { useVoiceRecorder, extensionFromMime } from "../lib/useVoiceRecorder";
+import CameraCapture from "../components/chat/CameraCapture";
 
 const API_BASE_URL = import.meta.env.VITE_API_URL ?? "http://localhost:8080";
 
-// dummy data for volunteer groups and messages
-const GROUPS = [
-  {
-    id: "brainy",
-    label: "Brainy",
-    title: "Brainy Coordination Channel",
-    meta: "Islandwide Monitoring • 18 helpers • 5 Open Tasks",
-    messages: [
-      { id: "b1", sender: "Brainy • auto-update", role: "brainy", text: "Heavy rain cells moving toward North region. Flood risk elevated for Kranji in the next 30 minutes.", at: "09:11" },
-      { id: "b2", sender: "RC Lim (Coordinator)", role: "coord", text: "Deploy 2 volunteers to Kranji drain point B. Confirm when dispatched.", at: "09:13" },
-      { id: "b3", sender: "Me", role: "me", text: "Copy. Pairing up and moving now.", at: "09:14" },
-    ],
-  },
-  {
-    id: "flash-flood",
-    label: "Flash Flood • 12",
-    title: "Flash Flood - Pasir Ris Dr 3",
-    meta: "Water 78% • 12 helpers • 3 Open Tasks",
-    messages: [
-      { id: "f1", sender: "Brainy • auto-update", role: "brainy", text: "PUB drain at 78%, up from 65% 15 min ago", at: "09:22" },
-      { id: "f2", sender: "Aisha (Coordinator)", role: "coord", text: "PUB drain at 78%, up from 65% 15 min ago", at: "09:25" },
-      { id: "f3", sender: "Me", role: "me", text: "I am on my way, 8 more minutes", at: "09:26" },
-      { id: "f4", sender: "Brainy • auto-update", role: "brainy", text: "New task created by RC Lim: \"Reroute pedestrians at gate 3\"", at: "09:29" },
-    ],
-  },
-  {
-    id: "fire",
-    label: "Fire • 5",
-    title: "Fire - Bedok North Ave 3",
-    meta: "Smoke level Medium • 5 helpers • 2 Open Tasks",
-    messages: [
-      { id: "r1", sender: "Brainy • auto-update", role: "brainy", text: "SCDF response team on-site. Keep perimeter clear for emergency vehicles.", at: "11:01" },
-      { id: "r2", sender: "Hassan (Coordinator)", role: "coord", text: "Need 1 volunteer to guide evacuees to temporary shelter point.", at: "11:03" },
-      { id: "r3", sender: "Me", role: "me", text: "Available. Moving to shelter point now.", at: "11:04" },
-    ],
-  },
-];
+function toTitleCase(value = "") {
+  if (!value) return "";
+  return value.charAt(0).toUpperCase() + value.slice(1);
+}
+
+function tabLabelFromTitle(title = "") {
+  if (!title) return "Crisis";
+  return title.length > 22 ? `${title.slice(0, 22)}...` : title;
+}
+
+function mapCrisisToTab(crisis) {
+  return {
+    id: crisis.id,
+    label: tabLabelFromTitle(crisis.title),
+    title: crisis.title,
+    meta: [
+      toTitleCase(crisis.type),
+      toTitleCase(crisis.severity),
+      crisis.location_name || "",
+    ].filter(Boolean).join(" • "),
+  };
+}
 
 function senderBadge(role) {
   if (role === "brainy") return "#B9D530";
@@ -56,46 +42,214 @@ function formatDuration(seconds) {
   return `${String(mins).padStart(2, "0")}:${String(secs).padStart(2, "0")}`;
 }
 
-export default function Volunteers() {
-  const [activeGroup, setActiveGroup] = useState("flash-flood");
-  const [draft, setDraft] = useState("");
-  const [messagesByGroup, setMessagesByGroup] = useState(() =>
-    GROUPS.reduce((acc, item) => {
-      acc[item.id] = item.messages.map((msg) => ({ ...msg }));
-      return acc;
-    }, {})
+function formatChatTime(timestamp) {
+  if (!timestamp) return new Date().toLocaleTimeString("en-SG", { hour: "2-digit", minute: "2-digit" });
+  const d = new Date(timestamp);
+  if (Number.isNaN(d.getTime())) {
+    return new Date().toLocaleTimeString("en-SG", { hour: "2-digit", minute: "2-digit" });
+  }
+  return d.toLocaleTimeString("en-SG", { hour: "2-digit", minute: "2-digit" });
+}
+
+function decodeBase64URL(value) {
+  const padded = value.padEnd(Math.ceil(value.length / 4) * 4, "=");
+  const normalized = padded.replace(/-/g, "+").replace(/_/g, "/");
+  return atob(normalized);
+}
+
+function getCurrentUserIDFromToken() {
+  const token = (
+    localStorage.getItem("brainy_token") ||
+    localStorage.getItem("token") ||
+    localStorage.getItem("authToken") ||
+    localStorage.getItem("jwt_token") ||
+    localStorage.getItem("jwt") ||
+    ""
   );
+  if (!token) return "";
+  try {
+    const payload = JSON.parse(decodeBase64URL(token.split(".")[1] || ""));
+    return payload.user_id || payload.userID || payload.sub || "";
+  } catch {
+    return "";
+  }
+}
+
+export default function Volunteers() {
+  const [activeGroup, setActiveGroup] = useState("");
+  const [crisisTabs, setCrisisTabs] = useState([]);
+  const [draft, setDraft] = useState("");
+  const [messagesByGroup, setMessagesByGroup] = useState({});
   const [isSendingVoice, setIsSendingVoice] = useState(false);
   const [pendingVoiceClip, setPendingVoiceClip] = useState(null);
+  const [pendingImage, setPendingImage] = useState(null);
   const [voiceStatus, setVoiceStatus] = useState("");
-  const [voiceSessionByGroup, setVoiceSessionByGroup] = useState({});
+  const [isLoadingCrises, setIsLoadingCrises] = useState(true);
+  const [crisesError, setCrisesError] = useState("");
+  const [isLoadingMessages, setIsLoadingMessages] = useState(false);
+  const [messagesError, setMessagesError] = useState("");
+  const [cameraMenuOpen, setCameraMenuOpen] = useState(false);
+  const [cameraOpen, setCameraOpen] = useState(false);
 
   const { isRecording, recordingSeconds, start: startRecorder, stop: stopRecorder } = useVoiceRecorder();
 
   const clipUrlsRef = useRef([]);
+  const imageUrlsRef = useRef([]);
+  const uploadInputRef = useRef(null);
+  const currentUserID = useMemo(() => getCurrentUserIDFromToken(), []);
 
-  const group = useMemo(
-    () => GROUPS.find((item) => item.id === activeGroup) ?? GROUPS[0],
-    [activeGroup]
-  );
+  const group = useMemo(() => {
+    if (crisisTabs.length === 0) return null;
+    return crisisTabs.find((item) => item.id === activeGroup) ?? crisisTabs[0];
+  }, [activeGroup, crisisTabs]);
   const messages = messagesByGroup[activeGroup] ?? [];
-  const canSend = Boolean(draft.trim() || pendingVoiceClip) && !isRecording && !isSendingVoice;
+  const canSend = Boolean(activeGroup) && Boolean(draft.trim() || pendingVoiceClip || pendingImage) && !isRecording && !isSendingVoice;
   const statusText = isRecording
     ? `Recording ${formatDuration(recordingSeconds)}...`
     : isSendingVoice
       ? (voiceStatus || "Uploading and transcribing voice note...")
-      : (voiceStatus || (pendingVoiceClip ? `Voice note ready (${formatDuration(pendingVoiceClip.duration)}).` : ""));
+      : (
+        voiceStatus
+        || (pendingVoiceClip
+          ? `Voice note ready (${formatDuration(pendingVoiceClip.duration)}).`
+          : (pendingImage ? `Photo ready (${pendingImage.file.name}). Press send.` : ""))
+      );
 
   // Revoke any object URLs we created for clip playback on unmount.
   useEffect(() => {
-    return () => clipUrlsRef.current.forEach((url) => URL.revokeObjectURL(url));
+    return () => {
+      clipUrlsRef.current.forEach((url) => URL.revokeObjectURL(url));
+      imageUrlsRef.current.forEach((url) => URL.revokeObjectURL(url));
+    };
   }, []);
+
+  useEffect(() => {
+    let ignore = false;
+
+    const loadCrises = async () => {
+      if (!ignore) setIsLoadingCrises(true);
+      try {
+        const res = await fetch(`${API_BASE_URL}/api/crises`);
+        const payload = await readJSONSafe(res);
+        if (!res.ok) {
+          throw new Error(payload.error ?? payload.__raw ?? `Could not load crises: ${res.status}`);
+        }
+
+        const rows = Array.isArray(payload) ? payload : [];
+        const tabs = rows
+          .filter((row) => row?.id && row?.title && row?.status === "active")
+          .map((row) => mapCrisisToTab({
+            id: row.id,
+            title: row.title,
+            type: row.type,
+            severity: row.severity,
+            location_name: row.location_name,
+          }));
+
+        if (ignore) return;
+        setCrisisTabs(tabs);
+        setMessagesByGroup((prev) => {
+          const next = {};
+          tabs.forEach((tab) => {
+            next[tab.id] = prev[tab.id] ?? [];
+          });
+          return next;
+        });
+        setActiveGroup((prev) => {
+          if (tabs.length === 0) return "";
+          if (prev && tabs.some((tab) => tab.id === prev)) return prev;
+          return tabs[0].id;
+        });
+        setCrisesError("");
+      } catch (err) {
+        if (!ignore) {
+          setCrisesError(err?.message || "Could not load crises.");
+          setCrisisTabs([]);
+          setActiveGroup("");
+        }
+      } finally {
+        if (!ignore) setIsLoadingCrises(false);
+      }
+    };
+
+    loadCrises();
+    const timer = setInterval(loadCrises, 30000);
+    return () => {
+      ignore = true;
+      clearInterval(timer);
+    };
+  }, []);
+
+  const mapServerMessageToUI = (msg) => {
+    const senderID = msg?.sender_user_id || "";
+    const senderRole = String(msg?.sender_role || "").toLowerCase();
+    const isMine = Boolean(currentUserID && senderID && senderID === currentUserID);
+
+    return {
+      id: msg?.id || `m-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+      sender: isMine ? "Me" : (msg?.sender_name || (senderRole === "coordinator" ? "Coordinator" : "Volunteer")),
+      role: isMine ? "me" : (senderRole === "coordinator" ? "coord" : "coord"),
+      text: (msg?.message_text || msg?.transcript || "").trim(),
+      messageType: msg?.message_type || "text",
+      audioDuration: null,
+      audioUrl: msg?.audio_url || null,
+      imageUrl: msg?.image_url || null,
+      at: formatChatTime(msg?.created_at),
+    };
+  };
+
+  useEffect(() => {
+    if (!activeGroup) return undefined;
+    let ignore = false;
+
+    const loadGroupMessages = async () => {
+      if (!ignore) {
+        setIsLoadingMessages(true);
+        setMessagesError("");
+      }
+
+      try {
+        const res = await fetch(`${API_BASE_URL}/api/groupchat/${activeGroup}/messages`);
+        const payload = await readJSONSafe(res);
+        if (!res.ok) {
+          throw new Error(payload.error ?? payload.__raw ?? `Could not load group chat: ${res.status}`);
+        }
+        const rows = Array.isArray(payload?.messages) ? payload.messages : [];
+        if (!ignore) {
+          setMessagesByGroup((prev) => ({
+            ...prev,
+            [activeGroup]: rows.map(mapServerMessageToUI),
+          }));
+        }
+      } catch (err) {
+        if (!ignore) setMessagesError(err?.message || "Could not load group chat messages.");
+      } finally {
+        if (!ignore) setIsLoadingMessages(false);
+      }
+    };
+
+    loadGroupMessages();
+    const timer = setInterval(loadGroupMessages, 2500);
+    return () => {
+      ignore = true;
+      clearInterval(timer);
+    };
+  }, [activeGroup, currentUserID]);
 
   const clearPendingVoiceClip = (nextStatus = "") => {
     if (!pendingVoiceClip?.url) return;
     URL.revokeObjectURL(pendingVoiceClip.url);
     clipUrlsRef.current = clipUrlsRef.current.filter((url) => url !== pendingVoiceClip.url);
     setPendingVoiceClip(null);
+    setVoiceStatus(nextStatus);
+  };
+
+  const clearPendingImage = (nextStatus = "") => {
+    if (pendingImage?.url) {
+      URL.revokeObjectURL(pendingImage.url);
+      imageUrlsRef.current = imageUrlsRef.current.filter((url) => url !== pendingImage.url);
+    }
+    setPendingImage(null);
     setVoiceStatus(nextStatus);
   };
 
@@ -113,7 +267,12 @@ export default function Volunteers() {
   };
 
   const startVoiceRecording = async () => {
+    if (!activeGroup) {
+      setVoiceStatus("No active crisis group selected.");
+      return;
+    }
     clearPendingVoiceClip();
+    clearPendingImage();
     const err = await startRecorder();
     if (err) {
       setVoiceStatus(err);
@@ -149,11 +308,10 @@ export default function Volunteers() {
     }
   };
 
-  const uploadVoice = async (voiceClip, sessionID) => {
+  const uploadVoice = async (voiceClip) => {
     const form = new FormData();
     const ext = extensionFromMime(voiceClip.mimeType || "");
     form.append("audio", voiceClip.blob, `voice-note.${ext}`);
-    if (sessionID) form.append("session_id", sessionID);
 
     const token = getAuthToken();
     const headers = token ? { Authorization: `Bearer ${token}` } : {};
@@ -177,79 +335,122 @@ export default function Volunteers() {
     return body;
   };
 
+  const uploadImage = async (file) => {
+    const token = getAuthToken();
+    if (!token) throw new Error("Please login first to upload photos.");
+
+    const form = new FormData();
+    form.append("image", file);
+
+    const res = await fetch(`${API_BASE_URL}/api/groupchat/image`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${token}` },
+      body: form,
+    });
+
+    const body = await readJSONSafe(res);
+    if (!res.ok) {
+      throw new Error(body.error ?? body.__raw ?? `Image upload failed: ${res.status}`);
+    }
+    if (!body?.image_url) {
+      throw new Error("Image upload endpoint returned no image_url.");
+    }
+    return body.image_url;
+  };
+
+  const postGroupChatMessage = async (crisisID, payload) => {
+    const token = getAuthToken();
+    if (!token) throw new Error("Please login first to send group chat messages.");
+
+    const res = await fetch(`${API_BASE_URL}/api/groupchat/${crisisID}/messages`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify(payload),
+    });
+
+    const body = await readJSONSafe(res);
+    if (!res.ok) {
+      throw new Error(body.error ?? body.__raw ?? `Could not send group chat message: ${res.status}`);
+    }
+    if (!body?.message) {
+      throw new Error("Group chat endpoint returned no message payload.");
+    }
+    return body.message;
+  };
+
   const handleSendMessage = async () => {
-    if (!canSend) return;
+    if (!canSend || !activeGroup) return;
 
     const outgoingText = draft.trim();
-    const now = () => new Date().toLocaleTimeString("en-SG", { hour: "2-digit", minute: "2-digit" });
 
-    // Text-only path remains local for now.
-    if (!pendingVoiceClip) {
-      const textMsg = {
-        id: `m-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
-        sender: "Me",
-        role: "me",
-        text: outgoingText,
-        at: now(),
-      };
-      setMessagesByGroup((prev) => ({
-        ...prev,
-        [activeGroup]: [...(prev[activeGroup] ?? []), textMsg],
-      }));
-      setDraft("");
-      setVoiceStatus("");
+    setIsSendingVoice(true);
+
+    if (pendingImage) {
+      setVoiceStatus("Uploading photo...");
+      try {
+        const imageURL = await uploadImage(pendingImage.file);
+        const saved = await postGroupChatMessage(activeGroup, {
+          message_type: "image",
+          message_text: outgoingText,
+          image_url: imageURL,
+        });
+        setMessagesByGroup((prev) => ({
+          ...prev,
+          [activeGroup]: [...(prev[activeGroup] ?? []), mapServerMessageToUI(saved)],
+        }));
+        setDraft("");
+        clearPendingImage("Photo sent.");
+      } catch (err) {
+        setVoiceStatus(err?.message || "Could not send photo.");
+      } finally {
+        setIsSendingVoice(false);
+      }
       return;
     }
 
-    setIsSendingVoice(true);
+    // Text-only path persists straight to crisis group chat history.
+    if (!pendingVoiceClip) {
+      try {
+        const saved = await postGroupChatMessage(activeGroup, {
+          message_type: "text",
+          message_text: outgoingText,
+        });
+        setMessagesByGroup((prev) => ({
+          ...prev,
+          [activeGroup]: [...(prev[activeGroup] ?? []), mapServerMessageToUI(saved)],
+        }));
+        setDraft("");
+        setVoiceStatus("");
+      } catch (err) {
+        setVoiceStatus(err?.message || "Could not send message.");
+      } finally {
+        setIsSendingVoice(false);
+      }
+      return;
+    }
+
     setVoiceStatus("Uploading and transcribing voice note...");
 
     try {
-      const sessionID = voiceSessionByGroup[activeGroup] ?? "";
-      const data = await uploadVoice(pendingVoiceClip, sessionID);
+      const data = await uploadVoice(pendingVoiceClip);
       const transcript = (data.transcript ?? "").trim();
-      const reply = (data.reply ?? "").trim();
-      const nextSessionID = data.session_id ?? sessionID;
-
-      if (nextSessionID) {
-        setVoiceSessionByGroup((prev) => ({ ...prev, [activeGroup]: nextSessionID }));
-      }
-
-      setMessagesByGroup((prev) => {
-        const list = [...(prev[activeGroup] ?? [])];
-
-        if (outgoingText) {
-          list.push({
-            id: `m-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
-            sender: "Me",
-            role: "me",
-            text: outgoingText,
-            at: now(),
-          });
-        }
-
-        list.push({
-          id: `m-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
-          sender: "Me",
-          role: "me",
-          text: transcript || "Voice note sent.",
-          audioDuration: pendingVoiceClip.duration ?? null,
-          audioUrl: pendingVoiceClip.url ?? null,
-          at: now(),
-        });
-
-        if (reply) {
-          list.push({
-            id: `m-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
-            sender: "Brainy • auto-update",
-            role: "brainy",
-            text: reply,
-            at: now(),
-          });
-        }
-
-        return { ...prev, [activeGroup]: list };
+      const saved = await postGroupChatMessage(activeGroup, {
+        message_type: "voice",
+        message_text: outgoingText || transcript,
+        transcript,
       });
+
+      const mapped = mapServerMessageToUI(saved);
+      mapped.audioUrl = pendingVoiceClip.url;
+      mapped.audioDuration = pendingVoiceClip.duration;
+
+      setMessagesByGroup((prev) => ({
+        ...prev,
+        [activeGroup]: [...(prev[activeGroup] ?? []), mapped],
+      }));
 
       setDraft("");
       setPendingVoiceClip(null);
@@ -259,6 +460,24 @@ export default function Volunteers() {
     } finally {
       setIsSendingVoice(false);
     }
+  };
+
+  const openUpload = () => {
+    setCameraMenuOpen(false);
+    uploadInputRef.current?.click();
+  };
+
+  const handlePhotoSelected = (file) => {
+    if (!file) return;
+    clearPendingVoiceClip();
+    if (pendingImage?.url) {
+      URL.revokeObjectURL(pendingImage.url);
+      imageUrlsRef.current = imageUrlsRef.current.filter((url) => url !== pendingImage.url);
+    }
+    const url = URL.createObjectURL(file);
+    imageUrlsRef.current.push(url);
+    setPendingImage({ file, url });
+    setVoiceStatus(`Photo ready (${file.name}). Press send.`);
   };
 
   return (
@@ -283,7 +502,7 @@ export default function Volunteers() {
         }}
       >
         <div style={{ display: "flex", gap: 12, marginBottom: 12, flexWrap: "wrap" }}>
-          {GROUPS.map((item) => {
+          {crisisTabs.map((item) => {
             const active = item.id === activeGroup;
             return (
               <button
@@ -327,7 +546,7 @@ export default function Volunteers() {
             }}
           >
             <div style={{ fontWeight: 800, fontSize: 38 / 2, color: "#131313", lineHeight: 1.2 }}>
-              {group.title}
+              {group?.title || "No active crisis"}
             </div>
             <div
               style={{
@@ -337,7 +556,7 @@ export default function Volunteers() {
                 fontWeight: 700,
               }}
             >
-              {group.meta}
+              {group?.meta || "No crisis metadata"}
             </div>
           </header>
 
@@ -352,14 +571,59 @@ export default function Volunteers() {
               minHeight: 0,
             }}
           >
+            {messages.length === 0 && (
+              <div style={{ color: "#6F6E78", fontSize: 14, fontWeight: 700, textAlign: "center", marginTop: 18 }}>
+                {isLoadingCrises
+                  ? "Loading crisis groups..."
+                  : isLoadingMessages
+                    ? "Loading group chat history..."
+                    : (messagesError || crisesError || "No messages yet for this crisis.")}
+              </div>
+            )}
+
             {messages.map((message) => {
               if (message.role === "me") {
                 const hasVoice = Boolean(message.audioUrl);
+                const hasImage = Boolean(message.imageUrl);
                 return (
                   <div key={message.id} style={{ width: "100%", display: "flex", justifyContent: "flex-end", marginBottom: 16 }}>
                     <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", maxWidth: "42%", gap: 8 }}>
                       <div style={{ color: "#6F6D77", fontWeight: 700, fontSize: 30 / 2, marginBottom: 5 }}>{message.sender}</div>
-                      {hasVoice ? (
+                      {hasImage ? (
+                        <>
+                          <img
+                            src={message.imageUrl}
+                            alt="Shared"
+                            style={{
+                              width: "min(360px, 100%)",
+                              maxHeight: 260,
+                              objectFit: "cover",
+                              borderRadius: 18,
+                              border: "2px solid #1E1E1E",
+                              display: "block",
+                              boxSizing: "border-box",
+                              background: "#9EC4DA",
+                            }}
+                          />
+                          {message.text && (
+                            <div
+                              style={{
+                                border: "2px solid #1E1E1E",
+                                borderRadius: 18,
+                                background: "#9EC4DA",
+                                padding: "10px 14px",
+                                fontSize: 34 / 2,
+                                color: "#141414",
+                                lineHeight: 1.25,
+                                width: "min(360px, 100%)",
+                                boxSizing: "border-box",
+                              }}
+                            >
+                              {message.text}
+                            </div>
+                          )}
+                        </>
+                      ) : hasVoice ? (
                         <>
                           <audio
                             controls
@@ -444,7 +708,7 @@ export default function Volunteers() {
                     <div
                       style={{
                         border: "2px solid #1E1E1E",
-                        borderRadius: 999,
+                        borderRadius: message.imageUrl ? 18 : 999,
                         background: "#ECE8DF",
                         padding: "13px 22px",
                         fontSize: 34 / 2,
@@ -453,6 +717,23 @@ export default function Volunteers() {
                         boxShadow: "0 2px 0 rgba(0,0,0,0.12)",
                       }}
                     >
+                      {message.imageUrl && (
+                        <img
+                          src={message.imageUrl}
+                          alt="Shared"
+                          style={{
+                            width: "min(360px, 100%)",
+                            maxHeight: 260,
+                            objectFit: "cover",
+                            borderRadius: 14,
+                            border: "2px solid #1E1E1E",
+                            display: "block",
+                            boxSizing: "border-box",
+                            marginBottom: message.text ? 10 : 0,
+                            background: "#ECE8DF",
+                          }}
+                        />
+                      )}
                       {message.text}
                       {message.audioUrl && (
                         <audio
@@ -493,9 +774,15 @@ export default function Volunteers() {
             >
               <div style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
                 <span>{statusText}</span>
-                {pendingVoiceClip && !isRecording && (
+                {(pendingVoiceClip || pendingImage) && !isRecording && (
                   <button
-                    onClick={() => clearPendingVoiceClip("Voice note deleted.")}
+                    onClick={() => {
+                      if (pendingVoiceClip) {
+                        clearPendingVoiceClip("Voice note deleted.");
+                      } else {
+                        clearPendingImage("Photo removed.");
+                      }
+                    }}
                     style={{
                       border: "none",
                       background: "transparent",
@@ -507,7 +794,7 @@ export default function Volunteers() {
                       cursor: "pointer",
                       lineHeight: 1,
                     }}
-                    title="Delete recorded voice note"
+                    title={pendingVoiceClip ? "Delete recorded voice note" : "Remove selected photo"}
                   >
                     <X size={14} />
                   </button>
@@ -516,22 +803,107 @@ export default function Volunteers() {
             </div>
 
             <div style={{ display: "flex", gap: 10 }}>
-              <button
-                style={{
-                  width: 62,
-                  height: 62,
-                  borderRadius: "50%",
-                  border: "2px solid #1E1E1E",
-                  background: "#F5F4F0",
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "center",
-                  cursor: "pointer",
-                }}
-                title="Attach Camera"
-              >
-                <Camera size={32} color="#111111" />
-              </button>
+              <div style={{ position: "relative" }}>
+                <input
+                  ref={uploadInputRef}
+                  type="file"
+                  accept="image/*"
+                  onChange={(e) => {
+                    handlePhotoSelected(e.target.files?.[0]);
+                    e.target.value = "";
+                  }}
+                  style={{ display: "none" }}
+                />
+                <button
+                  style={{
+                    width: 62,
+                    height: 62,
+                    borderRadius: "50%",
+                    border: "2px solid #1E1E1E",
+                    background: cameraMenuOpen ? "#E5E2DA" : "#F5F4F0",
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    cursor: "pointer",
+                  }}
+                  title="Add Photo"
+                  onClick={() => setCameraMenuOpen((prev) => !prev)}
+                >
+                  <Camera size={32} color="#111111" />
+                </button>
+                {cameraMenuOpen && (
+                  <>
+                    <div
+                      onClick={() => setCameraMenuOpen(false)}
+                      style={{ position: "fixed", inset: 0, zIndex: 20 }}
+                    />
+                    <div
+                      style={{
+                        position: "absolute",
+                        bottom: "calc(100% + 10px)",
+                        left: 0,
+                        zIndex: 30,
+                        background: "#FFFFFF",
+                        border: "1px solid #E5E7EB",
+                        boxShadow: "0 8px 24px rgba(0,0,0,0.12)",
+                        borderRadius: 12,
+                        minWidth: 190,
+                        padding: 6,
+                      }}
+                    >
+                      <button
+                        onClick={() => {
+                          setCameraMenuOpen(false);
+                          setCameraOpen(true);
+                        }}
+                        style={{
+                          width: "100%",
+                          display: "flex",
+                          alignItems: "center",
+                          gap: 10,
+                          border: "none",
+                          borderRadius: 8,
+                          background: "transparent",
+                          cursor: "pointer",
+                          padding: "10px 12px",
+                          fontFamily: "'Nunito', sans-serif",
+                          fontSize: 14,
+                          fontWeight: 700,
+                          color: "#1F2937",
+                        }}
+                        onMouseEnter={(e) => { e.currentTarget.style.background = "#F3F4F6"; }}
+                        onMouseLeave={(e) => { e.currentTarget.style.background = "transparent"; }}
+                      >
+                        <Camera size={18} color="#6B7280" />
+                        Take a photo
+                      </button>
+                      <button
+                        onClick={openUpload}
+                        style={{
+                          width: "100%",
+                          display: "flex",
+                          alignItems: "center",
+                          gap: 10,
+                          border: "none",
+                          borderRadius: 8,
+                          background: "transparent",
+                          cursor: "pointer",
+                          padding: "10px 12px",
+                          fontFamily: "'Nunito', sans-serif",
+                          fontSize: 14,
+                          fontWeight: 700,
+                          color: "#1F2937",
+                        }}
+                        onMouseEnter={(e) => { e.currentTarget.style.background = "#F3F4F6"; }}
+                        onMouseLeave={(e) => { e.currentTarget.style.background = "transparent"; }}
+                      >
+                        <ImageIcon size={18} color="#6B7280" />
+                        Upload a photo
+                      </button>
+                    </div>
+                  </>
+                )}
+              </div>
               <button
                 style={{
                   width: 62,
@@ -548,22 +920,6 @@ export default function Volunteers() {
                 onClick={handleMicClick}
               >
                 <Mic size={32} color={isRecording ? "#B42318" : "#111111"} />
-              </button>
-              <button
-                style={{
-                  width: 62,
-                  height: 62,
-                  borderRadius: "50%",
-                  border: "2px solid #1E1E1E",
-                  background: "#F5F4F0",
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "center",
-                  cursor: "pointer",
-                }}
-                title="Attach File"
-              >
-                <Paperclip size={32} color="#111111" />
               </button>
             </div>
 
@@ -614,6 +970,19 @@ export default function Volunteers() {
           </footer>
         </section>
       </main>
+      {cameraOpen && (
+        <CameraCapture
+          onCapture={(file) => {
+            handlePhotoSelected(file);
+            setCameraOpen(false);
+          }}
+          onClose={() => setCameraOpen(false)}
+          onUpload={() => {
+            setCameraOpen(false);
+            openUpload();
+          }}
+        />
+      )}
     </div>
   );
 }
