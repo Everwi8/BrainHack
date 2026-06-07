@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"os"
 	"time"
 )
@@ -13,30 +14,30 @@ import (
 // ─── Domain types ─────────────────────────────────────────────────────────────
 
 type Crisis struct {
-	ID           string    `json:"id,omitempty"`
-	ExternalID   string    `json:"external_id,omitempty"`
-	Title        string    `json:"title"`
-	Description  string    `json:"description"`
-	Type         string    `json:"type"`
-	Severity     string    `json:"severity"`
-	Status       string    `json:"status,omitempty"`
-	Lat          float64   `json:"lat"`
-	Lng          float64   `json:"lng"`
-	LocationName string    `json:"location_name"`
-	Source       string    `json:"source,omitempty"`
+	ID           string  `json:"id,omitempty"`
+	ExternalID   string  `json:"external_id,omitempty"`
+	Title        string  `json:"title"`
+	Description  string  `json:"description"`
+	Type         string  `json:"type"`
+	Severity     string  `json:"severity"`
+	Status       string  `json:"status,omitempty"`
+	Lat          float64 `json:"lat"`
+	Lng          float64 `json:"lng"`
+	LocationName string  `json:"location_name"`
+	Source       string  `json:"source,omitempty"`
 	// ApprovalStatus gates feed/map visibility: 'pending' | 'approved' | 'rejected'.
 	// omitempty so ingestion (which leaves it blank) falls back to the DB default.
 	ApprovalStatus string  `json:"approval_status,omitempty"`
-	ReportedBy   *string   `json:"reported_by,omitempty"`
-	ApprovedBy   *string   `json:"approved_by,omitempty"`
-	AISummary    string    `json:"ai_summary,omitempty"`
+	ReportedBy     *string `json:"reported_by,omitempty"`
+	ApprovedBy     *string `json:"approved_by,omitempty"`
+	AISummary      string  `json:"ai_summary,omitempty"`
 	// Sensors is a jsonb passthrough of the per-crisis live-sensor snapshot the
 	// CrisisDetail "Live data sources" cards render (nea_rain_mm, pub_drain_pct,
 	// lta_eta_min, moh_beds_avail). Raw so we don't pin a schema here; omitempty
 	// so rows without a snapshot serialise as no field (cards show "No data").
-	Sensors      json.RawMessage `json:"sensors,omitempty"`
-	CreatedAt    time.Time `json:"created_at,omitempty"`
-	UpdatedAt    time.Time `json:"updated_at,omitempty"`
+	Sensors   json.RawMessage `json:"sensors,omitempty"`
+	CreatedAt time.Time       `json:"created_at,omitempty"`
+	UpdatedAt time.Time       `json:"updated_at,omitempty"`
 }
 
 type CrisisWithTasks struct {
@@ -63,6 +64,27 @@ type User struct {
 	Name         string    `json:"name"`
 	Role         string    `json:"role,omitempty"`
 	CreatedAt    time.Time `json:"created_at,omitempty"`
+}
+
+type GroupChatMessage struct {
+	ID           string    `json:"id"`
+	SenderUserID string    `json:"sender_user_id"`
+	SenderName   string    `json:"sender_name"`
+	SenderRole   string    `json:"sender_role"`
+	MessageType  string    `json:"message_type"`
+	MessageText  string    `json:"message_text"`
+	Transcript   string    `json:"transcript,omitempty"`
+	AudioURL     string    `json:"audio_url,omitempty"`
+	CreatedAt    time.Time `json:"created_at"`
+}
+
+type GroupChatSession struct {
+	ID        string             `json:"id,omitempty"`
+	UserID    string             `json:"user_id,omitempty"`
+	Title     string             `json:"title,omitempty"`
+	Messages  []GroupChatMessage `json:"messages,omitempty"`
+	CreatedAt time.Time          `json:"created_at,omitempty"`
+	UpdatedAt time.Time          `json:"updated_at,omitempty"`
 }
 
 // ─── Client ──────────────────────────────────────────────────────────────────
@@ -369,6 +391,78 @@ func (c *Client) CreateUser(user User) (*User, error) {
 		return nil, fmt.Errorf("create user failed")
 	}
 	return &rows[0], nil
+}
+
+func (c *Client) GetUserByID(id string) (*User, error) {
+	data, err := c.req("GET", "users?id=eq."+id+"&select=*", nil, nil)
+	if err != nil {
+		return nil, err
+	}
+	var rows []User
+	if err := json.Unmarshal(data, &rows); err != nil {
+		return nil, err
+	}
+	if len(rows) == 0 {
+		return nil, fmt.Errorf("user not found")
+	}
+	return &rows[0], nil
+}
+
+const groupChatTitlePrefix = "group:"
+
+func groupChatTitle(crisisID string) string {
+	return groupChatTitlePrefix + crisisID
+}
+
+func (c *Client) GetGroupChatSessionByCrisisID(crisisID string) (*GroupChatSession, error) {
+	title := url.QueryEscape(groupChatTitle(crisisID))
+	path := "chat_sessions?title=eq." + title + "&select=*&order=created_at.asc&limit=1"
+	data, err := c.req("GET", path, nil, nil)
+	if err != nil {
+		return nil, err
+	}
+	var rows []GroupChatSession
+	if err := json.Unmarshal(data, &rows); err != nil {
+		return nil, err
+	}
+	if len(rows) == 0 {
+		return nil, nil
+	}
+	return &rows[0], nil
+}
+
+func (c *Client) CreateGroupChatSession(crisisID, ownerUserID string) (*GroupChatSession, error) {
+	body := map[string]interface{}{
+		"user_id":  ownerUserID,
+		"title":    groupChatTitle(crisisID),
+		"messages": []GroupChatMessage{},
+	}
+	data, err := c.req("POST", "chat_sessions", body, nil)
+	if err != nil {
+		return nil, err
+	}
+	var rows []GroupChatSession
+	if err := json.Unmarshal(data, &rows); err != nil || len(rows) == 0 {
+		return nil, fmt.Errorf("create group chat session failed")
+	}
+	return &rows[0], nil
+}
+
+func (c *Client) GetOrCreateGroupChatSession(crisisID, ownerUserID string) (*GroupChatSession, error) {
+	session, err := c.GetGroupChatSessionByCrisisID(crisisID)
+	if err != nil {
+		return nil, err
+	}
+	if session != nil {
+		return session, nil
+	}
+	return c.CreateGroupChatSession(crisisID, ownerUserID)
+}
+
+func (c *Client) SaveGroupChatMessages(sessionID string, messages []GroupChatMessage) error {
+	updates := map[string]interface{}{"messages": messages}
+	_, err := c.req("PATCH", "chat_sessions?id=eq."+sessionID, updates, nil)
+	return err
 }
 
 // ─── Chat sessions ───────────────────────────────────────────────────────────

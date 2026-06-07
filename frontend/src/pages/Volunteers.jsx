@@ -41,6 +41,39 @@ function formatDuration(seconds) {
   return `${String(mins).padStart(2, "0")}:${String(secs).padStart(2, "0")}`;
 }
 
+function formatChatTime(timestamp) {
+  if (!timestamp) return new Date().toLocaleTimeString("en-SG", { hour: "2-digit", minute: "2-digit" });
+  const d = new Date(timestamp);
+  if (Number.isNaN(d.getTime())) {
+    return new Date().toLocaleTimeString("en-SG", { hour: "2-digit", minute: "2-digit" });
+  }
+  return d.toLocaleTimeString("en-SG", { hour: "2-digit", minute: "2-digit" });
+}
+
+function decodeBase64URL(value) {
+  const padded = value.padEnd(Math.ceil(value.length / 4) * 4, "=");
+  const normalized = padded.replace(/-/g, "+").replace(/_/g, "/");
+  return atob(normalized);
+}
+
+function getCurrentUserIDFromToken() {
+  const token = (
+    localStorage.getItem("brainy_token") ||
+    localStorage.getItem("token") ||
+    localStorage.getItem("authToken") ||
+    localStorage.getItem("jwt_token") ||
+    localStorage.getItem("jwt") ||
+    ""
+  );
+  if (!token) return "";
+  try {
+    const payload = JSON.parse(decodeBase64URL(token.split(".")[1] || ""));
+    return payload.user_id || payload.userID || payload.sub || "";
+  } catch {
+    return "";
+  }
+}
+
 export default function Volunteers() {
   const [activeGroup, setActiveGroup] = useState("");
   const [crisisTabs, setCrisisTabs] = useState([]);
@@ -49,13 +82,15 @@ export default function Volunteers() {
   const [isSendingVoice, setIsSendingVoice] = useState(false);
   const [pendingVoiceClip, setPendingVoiceClip] = useState(null);
   const [voiceStatus, setVoiceStatus] = useState("");
-  const [voiceSessionByGroup, setVoiceSessionByGroup] = useState({});
   const [isLoadingCrises, setIsLoadingCrises] = useState(true);
   const [crisesError, setCrisesError] = useState("");
+  const [isLoadingMessages, setIsLoadingMessages] = useState(false);
+  const [messagesError, setMessagesError] = useState("");
 
   const { isRecording, recordingSeconds, start: startRecorder, stop: stopRecorder } = useVoiceRecorder();
 
   const clipUrlsRef = useRef([]);
+  const currentUserID = useMemo(() => getCurrentUserIDFromToken(), []);
 
   const group = useMemo(() => {
     if (crisisTabs.length === 0) return null;
@@ -131,6 +166,61 @@ export default function Volunteers() {
     };
   }, []);
 
+  const mapServerMessageToUI = (msg) => {
+    const senderID = msg?.sender_user_id || "";
+    const senderRole = String(msg?.sender_role || "").toLowerCase();
+    const isMine = Boolean(currentUserID && senderID && senderID === currentUserID);
+
+    return {
+      id: msg?.id || `m-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+      sender: isMine ? "Me" : (msg?.sender_name || (senderRole === "coordinator" ? "Coordinator" : "Volunteer")),
+      role: isMine ? "me" : (senderRole === "coordinator" ? "coord" : "coord"),
+      text: (msg?.message_text || msg?.transcript || "").trim(),
+      messageType: msg?.message_type || "text",
+      audioDuration: null,
+      audioUrl: msg?.audio_url || null,
+      at: formatChatTime(msg?.created_at),
+    };
+  };
+
+  useEffect(() => {
+    if (!activeGroup) return undefined;
+    let ignore = false;
+
+    const loadGroupMessages = async () => {
+      if (!ignore) {
+        setIsLoadingMessages(true);
+        setMessagesError("");
+      }
+
+      try {
+        const res = await fetch(`${API_BASE_URL}/api/groupchat/${activeGroup}/messages`);
+        const payload = await readJSONSafe(res);
+        if (!res.ok) {
+          throw new Error(payload.error ?? payload.__raw ?? `Could not load group chat: ${res.status}`);
+        }
+        const rows = Array.isArray(payload?.messages) ? payload.messages : [];
+        if (!ignore) {
+          setMessagesByGroup((prev) => ({
+            ...prev,
+            [activeGroup]: rows.map(mapServerMessageToUI),
+          }));
+        }
+      } catch (err) {
+        if (!ignore) setMessagesError(err?.message || "Could not load group chat messages.");
+      } finally {
+        if (!ignore) setIsLoadingMessages(false);
+      }
+    };
+
+    loadGroupMessages();
+    const timer = setInterval(loadGroupMessages, 2500);
+    return () => {
+      ignore = true;
+      clearInterval(timer);
+    };
+  }, [activeGroup, currentUserID]);
+
   const clearPendingVoiceClip = (nextStatus = "") => {
     if (!pendingVoiceClip?.url) return;
     URL.revokeObjectURL(pendingVoiceClip.url);
@@ -193,11 +283,10 @@ export default function Volunteers() {
     }
   };
 
-  const uploadVoice = async (voiceClip, sessionID) => {
+  const uploadVoice = async (voiceClip) => {
     const form = new FormData();
     const ext = extensionFromMime(voiceClip.mimeType || "");
     form.append("audio", voiceClip.blob, `voice-note.${ext}`);
-    if (sessionID) form.append("session_id", sessionID);
 
     const token = getAuthToken();
     const headers = token ? { Authorization: `Bearer ${token}` } : {};
@@ -221,79 +310,76 @@ export default function Volunteers() {
     return body;
   };
 
+  const postGroupChatMessage = async (crisisID, payload) => {
+    const token = getAuthToken();
+    if (!token) throw new Error("Please login first to send group chat messages.");
+
+    const res = await fetch(`${API_BASE_URL}/api/groupchat/${crisisID}/messages`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${token}`,
+      },
+      body: JSON.stringify(payload),
+    });
+
+    const body = await readJSONSafe(res);
+    if (!res.ok) {
+      throw new Error(body.error ?? body.__raw ?? `Could not send group chat message: ${res.status}`);
+    }
+    if (!body?.message) {
+      throw new Error("Group chat endpoint returned no message payload.");
+    }
+    return body.message;
+  };
+
   const handleSendMessage = async () => {
     if (!canSend || !activeGroup) return;
 
     const outgoingText = draft.trim();
-    const now = () => new Date().toLocaleTimeString("en-SG", { hour: "2-digit", minute: "2-digit" });
 
-    // Text-only path remains local for now.
+    setIsSendingVoice(true);
+
+    // Text-only path persists straight to crisis group chat history.
     if (!pendingVoiceClip) {
-      const textMsg = {
-        id: `m-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
-        sender: "Me",
-        role: "me",
-        text: outgoingText,
-        at: now(),
-      };
-      setMessagesByGroup((prev) => ({
-        ...prev,
-        [activeGroup]: [...(prev[activeGroup] ?? []), textMsg],
-      }));
-      setDraft("");
-      setVoiceStatus("");
+      try {
+        const saved = await postGroupChatMessage(activeGroup, {
+          message_type: "text",
+          message_text: outgoingText,
+        });
+        setMessagesByGroup((prev) => ({
+          ...prev,
+          [activeGroup]: [...(prev[activeGroup] ?? []), mapServerMessageToUI(saved)],
+        }));
+        setDraft("");
+        setVoiceStatus("");
+      } catch (err) {
+        setVoiceStatus(err?.message || "Could not send message.");
+      } finally {
+        setIsSendingVoice(false);
+      }
       return;
     }
 
-    setIsSendingVoice(true);
     setVoiceStatus("Uploading and transcribing voice note...");
 
     try {
-      const sessionID = voiceSessionByGroup[activeGroup] ?? "";
-      const data = await uploadVoice(pendingVoiceClip, sessionID);
+      const data = await uploadVoice(pendingVoiceClip);
       const transcript = (data.transcript ?? "").trim();
-      const reply = (data.reply ?? "").trim();
-      const nextSessionID = data.session_id ?? sessionID;
-
-      if (nextSessionID) {
-        setVoiceSessionByGroup((prev) => ({ ...prev, [activeGroup]: nextSessionID }));
-      }
-
-      setMessagesByGroup((prev) => {
-        const list = [...(prev[activeGroup] ?? [])];
-
-        if (outgoingText) {
-          list.push({
-            id: `m-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
-            sender: "Me",
-            role: "me",
-            text: outgoingText,
-            at: now(),
-          });
-        }
-
-        list.push({
-          id: `m-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
-          sender: "Me",
-          role: "me",
-          text: transcript || "Voice note sent.",
-          audioDuration: pendingVoiceClip.duration ?? null,
-          audioUrl: pendingVoiceClip.url ?? null,
-          at: now(),
-        });
-
-        if (reply) {
-          list.push({
-            id: `m-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
-            sender: "Brainy • auto-update",
-            role: "brainy",
-            text: reply,
-            at: now(),
-          });
-        }
-
-        return { ...prev, [activeGroup]: list };
+      const saved = await postGroupChatMessage(activeGroup, {
+        message_type: "voice",
+        message_text: outgoingText || transcript,
+        transcript,
       });
+
+      const mapped = mapServerMessageToUI(saved);
+      mapped.audioUrl = pendingVoiceClip.url;
+      mapped.audioDuration = pendingVoiceClip.duration;
+
+      setMessagesByGroup((prev) => ({
+        ...prev,
+        [activeGroup]: [...(prev[activeGroup] ?? []), mapped],
+      }));
 
       setDraft("");
       setPendingVoiceClip(null);
@@ -398,7 +484,11 @@ export default function Volunteers() {
           >
             {messages.length === 0 && (
               <div style={{ color: "#6F6E78", fontSize: 14, fontWeight: 700, textAlign: "center", marginTop: 18 }}>
-                {isLoadingCrises ? "Loading crisis groups..." : (crisesError || "No messages yet for this crisis.")}
+                {isLoadingCrises
+                  ? "Loading crisis groups..."
+                  : isLoadingMessages
+                    ? "Loading group chat history..."
+                    : (messagesError || crisesError || "No messages yet for this crisis.")}
               </div>
             )}
 

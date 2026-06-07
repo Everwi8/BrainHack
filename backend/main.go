@@ -113,6 +113,8 @@ func main() {
 		api.GET("/volunteers", handler.ListVolunteers)
 		api.POST("/volunteers", middleware.RequireAuth(), handler.RegisterVolunteer)
 		api.POST("/voice", middleware.RequireAuth(), handler.Voice)
+		api.GET("/groupchat/:crisisID/messages", handler.GetGroupChatMessages)
+		api.POST("/groupchat/:crisisID/messages", middleware.RequireAuth(), handler.PostGroupChatMessage)
 
 		// Admin — runtime demo/live data toggle (open for demo simplicity)
 		api.GET("/admin/data-source", handler.DataSourceStatus)
