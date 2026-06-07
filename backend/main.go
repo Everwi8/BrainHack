@@ -115,6 +115,7 @@ func main() {
 		api.POST("/voice", middleware.RequireAuth(), handler.Voice)
 		api.GET("/groupchat/:crisisID/messages", handler.GetGroupChatMessages)
 		api.POST("/groupchat/:crisisID/messages", middleware.RequireAuth(), handler.PostGroupChatMessage)
+		api.POST("/groupchat/image", middleware.RequireAuth(), handler.UploadGroupChatImage)
 
 		// Admin — runtime demo/live data toggle (open for demo simplicity)
 		api.GET("/admin/data-source", handler.DataSourceStatus)

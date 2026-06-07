@@ -3,6 +3,8 @@ package handler
 import (
 	"crypto/rand"
 	"encoding/hex"
+	"io"
+	"log"
 	"net/http"
 	"strings"
 	"time"
@@ -16,6 +18,7 @@ type postGroupChatReq struct {
 	MessageType string `json:"message_type"`
 	MessageText string `json:"message_text"`
 	Transcript  string `json:"transcript"`
+	ImageURL    string `json:"image_url"`
 	AudioURL    string `json:"audio_url"`
 }
 
@@ -70,20 +73,23 @@ func PostGroupChatMessage(c *gin.Context) {
 	req.MessageType = strings.TrimSpace(strings.ToLower(req.MessageType))
 	req.MessageText = strings.TrimSpace(req.MessageText)
 	req.Transcript = strings.TrimSpace(req.Transcript)
+	req.ImageURL = strings.TrimSpace(req.ImageURL)
 	req.AudioURL = strings.TrimSpace(req.AudioURL)
 
 	if req.MessageType == "" {
-		if req.Transcript != "" || req.AudioURL != "" {
+		if req.ImageURL != "" {
+			req.MessageType = "image"
+		} else if req.Transcript != "" || req.AudioURL != "" {
 			req.MessageType = "voice"
 		} else {
 			req.MessageType = "text"
 		}
 	}
-	if req.MessageType != "text" && req.MessageType != "voice" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "message_type must be text or voice"})
+	if req.MessageType != "text" && req.MessageType != "voice" && req.MessageType != "image" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "message_type must be text, voice, or image"})
 		return
 	}
-	if req.MessageText == "" && req.Transcript == "" && req.AudioURL == "" {
+	if req.MessageText == "" && req.Transcript == "" && req.ImageURL == "" && req.AudioURL == "" {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "message cannot be empty"})
 		return
 	}
@@ -102,6 +108,7 @@ func PostGroupChatMessage(c *gin.Context) {
 		MessageType:  req.MessageType,
 		MessageText:  req.MessageText,
 		Transcript:   req.Transcript,
+		ImageURL:     req.ImageURL,
 		AudioURL:     req.AudioURL,
 		CreatedAt:    time.Now().UTC(),
 	}
@@ -119,6 +126,54 @@ func PostGroupChatMessage(c *gin.Context) {
 		"message":    entry,
 		"session_id": session.ID,
 	})
+}
+
+// UploadGroupChatImage stores one image and returns its public URL for use in a
+// subsequent /groupchat/:crisisID/messages POST.
+func UploadGroupChatImage(c *gin.Context) {
+	userID := c.GetString("userID")
+	if userID == "" {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "missing user identity"})
+		return
+	}
+
+	fileHeader, err := c.FormFile("image")
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "image file is required (multipart field 'image')"})
+		return
+	}
+	if fileHeader.Size > maxPhotoBytes {
+		c.JSON(http.StatusRequestEntityTooLarge, gin.H{"error": "image too large (max 8 MB)"})
+		return
+	}
+
+	f, err := fileHeader.Open()
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "could not read uploaded image"})
+		return
+	}
+	defer f.Close()
+
+	data, err := io.ReadAll(io.LimitReader(f, maxPhotoBytes))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "could not read uploaded image"})
+		return
+	}
+
+	mime := http.DetectContentType(data)
+	if !strings.HasPrefix(mime, "image/") {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "uploaded file is not a recognised image"})
+		return
+	}
+
+	imageURL, err := lib.DB.UploadChatImage(userID, data, mime)
+	if err != nil {
+		log.Printf("[groupchat/image] image upload failed: %v", err)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "could not upload image"})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"image_url": imageURL})
 }
 
 func newGroupMessageID() string {

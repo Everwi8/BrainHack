@@ -74,6 +74,7 @@ type GroupChatMessage struct {
 	MessageType  string    `json:"message_type"`
 	MessageText  string    `json:"message_text"`
 	Transcript   string    `json:"transcript,omitempty"`
+	ImageURL     string    `json:"image_url,omitempty"`
 	AudioURL     string    `json:"audio_url,omitempty"`
 	CreatedAt    time.Time `json:"created_at"`
 }
