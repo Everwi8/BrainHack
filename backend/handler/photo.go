@@ -6,6 +6,7 @@ import (
 	"encoding/base64"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"strings"
 
@@ -55,6 +56,15 @@ func ChatPhoto(c *gin.Context) {
 	caption := c.PostForm("caption")
 	userID := c.GetString("userID")
 
+	// Persist the image to Supabase Storage so it survives reloads. Best-effort:
+	// if the upload fails we still answer (the transcript just won't show the
+	// image), rather than failing the whole request.
+	imageURL, err := lib.DB.UploadChatImage(userID, data, mime)
+	if err != nil {
+		log.Printf("[chat/photo] image upload failed: %v", err)
+		imageURL = ""
+	}
+
 	// Title a photo-started session from the caption, or a sensible default.
 	newTitle := deriveTitle(caption)
 	if newTitle == defaultChatTitle {
@@ -66,7 +76,7 @@ func ChatPhoto(c *gin.Context) {
 		return
 	}
 
-	reply, obs, updated, err := lib.VisionTurn(session.Messages, caption, dataURL)
+	reply, obs, updated, err := lib.VisionTurn(session.Messages, caption, dataURL, imageURL)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
@@ -85,6 +95,7 @@ func ChatPhoto(c *gin.Context) {
 		"reply":      reply,
 		"session_id": session.ID,
 		"title":      title,
+		"image_url":  imageURL,
 	}
 	if obs != nil {
 		if finding, ok := lib.ObservationToFinding(*obs, caption); ok {

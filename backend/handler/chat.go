@@ -120,7 +120,7 @@ func GetChatSession(c *gin.Context) {
 		if m.Role == "user" {
 			role = "user"
 		}
-		msgs = append(msgs, gin.H{"id": i + 1, "role": role, "text": m.Content})
+		msgs = append(msgs, gin.H{"id": i + 1, "role": role, "text": m.Content, "imageUrl": m.ImageURL})
 	}
 
 	c.JSON(http.StatusOK, gin.H{

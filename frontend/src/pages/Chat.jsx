@@ -1,9 +1,11 @@
 import { useState, useRef, useEffect, useCallback } from "react";
+import { useLocation, useNavigate } from "react-router-dom";
 import { Waves, House, Zap, AlertTriangle, Activity, Bot, X, Plus, MessageSquare, Trash2 } from "lucide-react";
 import Navbar from "../components/layout/NavBar";
 import BrainyMascot from "../components/BrainyMascot";
 import MessageBubble from "../components/chat/MessageBubble";
 import ChatInput from "../components/chat/ChatInput";
+import CameraCapture from "../components/chat/CameraCapture";
 import InlineCrisisCard from "../components/chat/InlineCrisisCard";
 import { api } from "../lib/api";
 import { useVoiceRecorder, extensionFromMime } from "../lib/useVoiceRecorder";
@@ -62,9 +64,14 @@ export default function Chat() {
   const [sessionId, setSessionId] = useState(null);
   const [sessions, setSessions] = useState([]);             // previous chats (sidebar)
   const [pendingImage, setPendingImage] = useState(null);   // { file, url }
+  const [cameraOpen, setCameraOpen] = useState(false);      // live webcam capture modal
   const [isTranscribing, setIsTranscribing] = useState(false);
   const { isRecording, start: startRecording, stop: stopRecording } = useVoiceRecorder();
   const messagesEndRef = useRef(null);
+  const chatInputRef = useRef(null);      // imperative handle to open the photo picker
+  const location = useLocation();
+  const navigate = useNavigate();
+  const consumedIntentRef = useRef(null); // guards against re-running the same arrival intent
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -98,7 +105,7 @@ export default function Chat() {
       const res = await api.get(`/api/chat/sessions/${id}`);
       setSessionId(res.id);
       setMessages((res.messages ?? []).map(m => ({
-        id: m.id, role: m.role, text: m.text,
+        id: m.id, role: m.role, text: m.text, imageUrl: m.imageUrl || undefined,
       })));
     } catch (err) {
       setMessages([{ id: Date.now(), role: "bot", timestamp: nowTime(),
@@ -192,6 +199,25 @@ export default function Chat() {
       setIsTyping(false);
     }
   };
+
+  // Act on an intent passed via router state from the Home page:
+  //   { prompt }          → Quick Topics: auto-send the message
+  //   { action: "photo" } → "Snap a photo": open the device camera
+  //   { action: "voice" } → "Record voice memos": start recording
+  // The intent is consumed once: we clear the router state and remember it so a
+  // refresh, back-navigation, or StrictMode double-run can't re-trigger it.
+  useEffect(() => {
+    const { prompt, action } = location.state ?? {};
+    const intent = prompt ?? action;
+    if (!intent || consumedIntentRef.current === intent) return;
+    consumedIntentRef.current = intent;
+    navigate(location.pathname, { replace: true, state: {} });
+
+    if (prompt) sendMessage(prompt);
+    else if (action === "photo") setCameraOpen(true);
+    else if (action === "voice") handleMic();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [location.state, navigate]);
 
   // showSituation pulls the live triage report and renders the top findings as
   // crisis cards — this is the AI triage backend driving the chat with real
@@ -483,16 +509,26 @@ export default function Chat() {
 
           {/* Input bar */}
           <ChatInput
+            ref={chatInputRef}
             value={input}
             onChange={e => setInput(e.target.value)}
             onSend={() => (pendingImage ? sendPhoto() : sendMessage())}
             onPickImage={handlePickImage}
+            onTakePhoto={() => setCameraOpen(true)}
             onMic={handleMic}
             recording={isRecording}
             transcribing={isTranscribing}
             disabled={isTyping || isTranscribing}
           />
         </div>
+
+        {cameraOpen && (
+          <CameraCapture
+            onCapture={(file) => { handlePickImage(file); setCameraOpen(false); }}
+            onClose={() => setCameraOpen(false)}
+            onUpload={() => { setCameraOpen(false); chatInputRef.current?.openUpload(); }}
+          />
+        )}
       </div>
     </div>
   );

@@ -1,12 +1,20 @@
-import { Camera, Mic, SendHorizontal } from "lucide-react";
-import { useRef, useState } from "react";
+import { Camera, Image as ImageIcon, Mic, SendHorizontal } from "lucide-react";
+import { forwardRef, useImperativeHandle, useRef, useState } from "react";
 
-export default function ChatInput({
-  value, onChange, onSend, onPickImage, onMic,
+const ChatInput = forwardRef(function ChatInput({
+  value, onChange, onSend, onPickImage, onMic, onTakePhoto,
   recording = false, transcribing = false, disabled = false,
-}) {
+}, ref) {
   const [focused, setFocused] = useState(false);
-  const fileInputRef = useRef(null);
+  const [menuOpen, setMenuOpen] = useState(false);
+  const uploadInputRef = useRef(null);
+
+  const takePhoto = () => { setMenuOpen(false); onTakePhoto?.(); };
+  const openUpload = () => { setMenuOpen(false); uploadInputRef.current?.click(); };
+
+  // Let the parent open the upload picker programmatically (camera capture is
+  // driven by the parent's modal via onTakePhoto).
+  useImperativeHandle(ref, () => ({ openUpload }));
 
   // While recording, the text field and send are locked but the mic stays
   // active so the user can tap it again to stop.
@@ -19,7 +27,7 @@ export default function ChatInput({
     }
   };
 
-  const handleCameraClick = () => { if (!locked) fileInputRef.current?.click(); };
+  const handleCameraClick = () => { if (!locked) setMenuOpen(o => !o); };
 
   const handleFileChange = (e) => {
     const file = e.target.files?.[0];
@@ -47,28 +55,65 @@ export default function ChatInput({
       transition: "box-shadow 0.2s, opacity 0.2s",
     }}>
       <input
-        ref={fileInputRef}
+        ref={uploadInputRef}
         type="file"
         accept="image/*"
-        capture="environment"
         onChange={handleFileChange}
         style={{ display: "none" }}
       />
 
-      {/* Camera */}
-      <button
-        onClick={handleCameraClick}
-        disabled={locked}
-        style={{
-          background: "none", border: "none", cursor: locked ? "not-allowed" : "pointer",
-          padding: 6, borderRadius: 8, display: "flex", alignItems: "center", justifyContent: "center",
-          flexShrink: 0,
-        }}
-        onMouseEnter={e => { if (!locked) e.currentTarget.style.background = "#F3F4F6"; }}
-        onMouseLeave={e => e.currentTarget.style.background = "none"}
-      >
-        <Camera size={20} color="#6B7280" />
-      </button>
+      {/* Camera — opens a small menu: take a photo or upload */}
+      <div style={{ position: "relative", flexShrink: 0, display: "flex" }}>
+        <button
+          onClick={handleCameraClick}
+          disabled={locked}
+          title="Add a photo"
+          style={{
+            background: menuOpen ? "#F3F4F6" : "none",
+            border: "none", cursor: locked ? "not-allowed" : "pointer",
+            padding: 6, borderRadius: 8, display: "flex", alignItems: "center", justifyContent: "center",
+          }}
+          onMouseEnter={e => { if (!locked) e.currentTarget.style.background = "#F3F4F6"; }}
+          onMouseLeave={e => { if (!menuOpen) e.currentTarget.style.background = "none"; }}
+        >
+          <Camera size={20} color="#6B7280" />
+        </button>
+
+        {menuOpen && (
+          <>
+            {/* Backdrop: click anywhere else to dismiss the menu */}
+            <div
+              onClick={() => setMenuOpen(false)}
+              style={{ position: "fixed", inset: 0, zIndex: 40 }}
+            />
+            <div style={{
+              position: "absolute", bottom: "calc(100% + 8px)", left: 0, zIndex: 50,
+              background: "#fff", borderRadius: 12, padding: 6, minWidth: 180,
+              boxShadow: "0 4px 18px rgba(0,0,0,0.16)", border: "1px solid #F3F4F6",
+            }}>
+              {[
+                { Icon: Camera,    label: "Take a photo", onClick: takePhoto },
+                { Icon: ImageIcon, label: "Upload a photo", onClick: openUpload },
+              ].map(({ Icon, label, onClick }) => (
+                <button
+                  key={label}
+                  onClick={onClick}
+                  style={{
+                    display: "flex", alignItems: "center", gap: 10, width: "100%",
+                    background: "none", border: "none", cursor: "pointer",
+                    padding: "10px 12px", borderRadius: 8, textAlign: "left",
+                    fontFamily: "'Nunito', sans-serif", fontSize: 14, fontWeight: 600, color: "#1a1a2e",
+                  }}
+                  onMouseEnter={e => e.currentTarget.style.background = "#F3F4F6"}
+                  onMouseLeave={e => e.currentTarget.style.background = "none"}
+                >
+                  <Icon size={18} color="#6B7280" /> {label}
+                </button>
+              ))}
+            </div>
+          </>
+        )}
+      </div>
 
       {/* Mic — turns red while recording; clickable then so it can stop */}
       <button
@@ -118,4 +163,6 @@ export default function ChatInput({
       </button>
     </div>
   );
-}
+});
+
+export default ChatInput;

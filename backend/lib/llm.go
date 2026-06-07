@@ -36,10 +36,13 @@ Response style:
 - For crisis queries: safety action → context → next steps`
 )
 
-// Message is a single chat turn.
+// Message is a single chat turn. ImageURL is non-empty only for a persisted
+// photo turn — it holds the Supabase Storage URL so the conversation can render
+// the image on reload. It is NOT sent to the LLM (assemblePrompt drops it).
 type Message struct {
-	Role    string `json:"role"`
-	Content string `json:"content"`
+	Role     string `json:"role"`
+	Content  string `json:"content"`
+	ImageURL string `json:"image_url,omitempty"`
 }
 
 // maxTokens caps each completion. It bounds worst-case latency while leaving
@@ -93,7 +96,11 @@ func assemblePrompt(turns []Message) []Message {
 	if ctx := currentTriageContext(); ctx != "" {
 		msgs = append(msgs, Message{Role: "system", Content: ctx})
 	}
-	return append(msgs, turns...)
+	// Copy role/content only — never forward ImageURL to the text model.
+	for _, t := range turns {
+		msgs = append(msgs, Message{Role: t.Role, Content: t.Content})
+	}
+	return msgs
 }
 
 // trimTurns keeps only the most recent maxStoredTurns messages.
@@ -413,11 +420,14 @@ func ExtractPhotoObservation(caption, imageDataURL string) (PhotoObservation, er
 // not the verbose machine analysis: the analysis is fed to the model for this
 // one call only, so reloading the conversation later shows something readable
 // while the assistant's own reply still carries the context forward.
-func VisionTurn(turns []Message, caption, imageDataURL string) (reply string, obs *PhotoObservation, updated []Message, err error) {
+func VisionTurn(turns []Message, caption, imageDataURL, imageURL string) (reply string, obs *PhotoObservation, updated []Message, err error) {
 	userTrace := "[Shared a photo]"
 	if caption != "" {
 		userTrace += " " + caption
 	}
+	// The persisted user turn carries the stored image URL (if the upload
+	// succeeded) so the conversation can render the photo when reloaded.
+	userTurn := Message{Role: "user", Content: userTrace, ImageURL: imageURL}
 
 	extracted, extractErr := ExtractPhotoObservation(caption, imageDataURL)
 	if extractErr != nil {
@@ -431,7 +441,7 @@ func VisionTurn(turns []Message, caption, imageDataURL string) (reply string, ob
 			return "", nil, nil, err
 		}
 		turns = append(turns,
-			Message{Role: "user", Content: userTrace},
+			userTurn,
 			Message{Role: "assistant", Content: reply})
 		return reply, nil, trimTurns(turns), nil
 	}
@@ -463,7 +473,7 @@ func VisionTurn(turns []Message, caption, imageDataURL string) (reply string, ob
 	}
 
 	turns = append(turns,
-		Message{Role: "user", Content: userTrace},
+		userTurn,
 		Message{Role: "assistant", Content: reply})
 	return reply, obs, trimTurns(turns), nil
 }

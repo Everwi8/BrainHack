@@ -2,12 +2,13 @@
 import { useNavigate } from "react-router-dom";
 import { Camera, MessageCircle, Mic, Waves, BedDouble, Home as HomeIcon, AlertTriangle, LifeBuoy } from "lucide-react";
 
+// Each quick topic opens the chat and auto-sends `prompt` to Brainy.
 const quickTopics = [
-  { Icon: Waves,         label: "Floods",        bg: "#DBEAFE", color: "#3B82F6", action: "/floods" },
-  { Icon: BedDouble,     label: "Hospital Beds", bg: "#dbfee3", color: "#2ba552", action: "/hospital-beds" },
-  { Icon: HomeIcon,      label: "Shelters",      bg: "#fef3db", color: "#efa42c", action: "/shelters" },
-  { Icon: AlertTriangle, label: "Find Out More", bg: "#FEF3C7", color: "#F59E0B", action: "/info" },
-  { Icon: LifeBuoy,      label: "Get Help",      bg: "#FEE2E2", color: "#EF4444", action: "/help" },
+  { Icon: Waves,         label: "Floods",        bg: "#DBEAFE", color: "#3B82F6", prompt: "Are there any flood alerts in Singapore right now?" },
+  { Icon: BedDouble,     label: "Hospital Beds", bg: "#dbfee3", color: "#2ba552", prompt: "Which hospitals have available beds right now?" },
+  { Icon: HomeIcon,      label: "Shelters",      bg: "#fef3db", color: "#efa42c", prompt: "Where are the nearest emergency shelters I can go to?" },
+  { Icon: AlertTriangle, label: "Find Out More", bg: "#FEF3C7", color: "#F59E0B", prompt: "What is BrainySG and what can you help me with?" },
+  { Icon: LifeBuoy,      label: "Get Help",      bg: "#FEE2E2", color: "#EF4444", prompt: "I need help during an emergency — what should I do?" },
 ];
 
 export default function BrainyPanel() {
@@ -27,9 +28,9 @@ export default function BrainyPanel() {
         <div style={{ fontSize: 12, fontWeight: 700, color: "#999", letterSpacing: 1, marginBottom: 14 }}>ACTIONS</div>
         <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
           {[
-            { Icon: Camera,        label: "Snap a photo",      action: () => navigate("/chat") },
+            { Icon: Camera,        label: "Snap a photo",      action: () => navigate("/chat", { state: { action: "photo" } }) },
             { Icon: MessageCircle, label: "Chat with Brainy",  action: () => navigate("/chat") },
-            { Icon: Mic,           label: "Record voice memos",action: () => navigate("/chat") },
+            { Icon: Mic,           label: "Record voice memos",action: () => navigate("/chat", { state: { action: "voice" } }) },
           ].map(({ Icon, label, action }) => (
             <button key={label} onClick={action} style={{
               background: "#fff",
@@ -56,8 +57,8 @@ export default function BrainyPanel() {
 
         <div style={{ fontSize: 12, fontWeight: 700, color: "#999", letterSpacing: 1, margin: "20px 0 14px" }}>QUICK TOPICS</div>
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 10 }}>
-          {quickTopics.map(({ Icon, label, bg, color, action }) => (
-            <button key={label} onClick={() => navigate(action)} style={{
+          {quickTopics.map(({ Icon, label, bg, color, prompt }) => (
+            <button key={label} onClick={() => navigate("/chat", { state: { prompt } })} style={{
               background: bg,
               border: "none",
               borderRadius: 14,

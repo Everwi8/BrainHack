@@ -325,3 +325,74 @@ func (c *Client) DeleteChatSession(id, userID string) error {
 	_, err := c.req("DELETE", "chat_sessions?id=eq."+id+"&user_id=eq."+userID, nil, nil)
 	return err
 }
+
+// ─── Storage (chat images) ────────────────────────────────────────────────────
+
+// chatImageBucket is the public Storage bucket chat photos are uploaded to.
+const chatImageBucket = "chat-images"
+
+// extFromMime maps an image MIME type to a file extension for the object key.
+func extFromMime(mime string) string {
+	switch mime {
+	case "image/png":
+		return "png"
+	case "image/webp":
+		return "webp"
+	case "image/gif":
+		return "gif"
+	default:
+		return "jpg"
+	}
+}
+
+// EnsureChatBucket creates the public chat-images bucket if it doesn't exist.
+// Best-effort: a 400 (already exists) is fine. Called once at startup. The
+// service key has storage-admin rights, so this needs no manual dashboard step.
+func (c *Client) EnsureChatBucket() error {
+	body, _ := json.Marshal(map[string]any{
+		"id": chatImageBucket, "name": chatImageBucket, "public": true,
+	})
+	req, err := http.NewRequest("POST", c.baseURL+"/storage/v1/bucket", bytes.NewReader(body))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("apikey", c.serviceKey)
+	req.Header.Set("Authorization", "Bearer "+c.serviceKey)
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := c.http.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	_, _ = io.Copy(io.Discard, resp.Body)
+	return nil
+}
+
+// UploadChatImage stores image bytes in the chat-images bucket under the user's
+// folder and returns the public URL. Object key: <userID>/<nanos>.<ext>.
+func (c *Client) UploadChatImage(userID string, data []byte, mime string) (string, error) {
+	objectPath := fmt.Sprintf("%s/%d.%s", userID, time.Now().UnixNano(), extFromMime(mime))
+	uploadURL := c.baseURL + "/storage/v1/object/" + chatImageBucket + "/" + objectPath
+
+	req, err := http.NewRequest("POST", uploadURL, bytes.NewReader(data))
+	if err != nil {
+		return "", err
+	}
+	req.Header.Set("apikey", c.serviceKey)
+	req.Header.Set("Authorization", "Bearer "+c.serviceKey)
+	req.Header.Set("Content-Type", mime)
+	req.Header.Set("x-upsert", "true")
+
+	resp, err := c.http.Do(req)
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+	b, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode >= 400 {
+		return "", fmt.Errorf("storage upload %d: %s", resp.StatusCode, b)
+	}
+
+	return c.baseURL + "/storage/v1/object/public/" + chatImageBucket + "/" + objectPath, nil
+}

@@ -23,6 +23,11 @@ func main() {
 
 	lib.Init()
 
+	// Ensure the public Storage bucket for chat photos exists (best-effort).
+	if err := lib.DB.EnsureChatBucket(); err != nil {
+		log.Printf("[storage] could not ensure chat-images bucket: %v", err)
+	}
+
 	// Pick the triage data source: DATA_SOURCE=demo serves the canned demo
 	// scenario (db/seeds/demo_crises.sql), anything else uses the live
 	// cross-agency feeds. Flippable at runtime via /api/admin/data-source.
