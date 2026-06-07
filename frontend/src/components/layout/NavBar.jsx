@@ -6,7 +6,7 @@ import { useAuth } from "../../lib/auth";
 const NAV_LINKS = [
   { label: "Home",  path: "/home" },
   { label: "Map",   path: "/map" },
-  { label: "Tasks", path: "/crisis" },
+  { label: "Tasks", path: "/tasks" },
   { label: "Volunteer", path: "/volunteers" },
   { label: "Feed",  path: "/timeline" },
   { label: "Chat",  path: "/chat" },

@@ -9,11 +9,12 @@ import { MapContainer, TileLayer, CircleMarker, Tooltip } from "react-leaflet";
 import {
   ArrowLeft, MapPin, Clock, Droplets, Waves, TrainFront, BedDouble,
   TrendingUp, TrendingDown, Minus, ShieldCheck, ExternalLink, Users, ListTodo,
-  MessageCircle, MessagesSquare, ChevronRight,
+  MessageCircle, MessagesSquare, ChevronRight, AlertTriangle, Sparkles, Layers,
 } from "lucide-react";
 import Navbar from "../components/layout/NavBar";
 import BrainyMascot from "../components/BrainyMascot";
 import BrainyDrawer from "../components/crisis/BrainyDrawer";
+import { api } from "../lib/api";
 
 // Placeholder "nearby helpers" for the mini-map until James's live volunteer
 // locations (GET /api/volunteers) are wired up — that endpoint is still a stub.
@@ -31,11 +32,14 @@ const CARD     = "#fff";
 const CARD_SH  = "0 2px 12px rgba(0,0,0,0.07)";
 const RADIUS   = 16;
 
-// Severity → colour + label. Mirrors CrisisMarker.jsx so the dot colour the user
-// clicked on the map matches the badge they see here.
+// Severity → colour + label. Covers both the crisis-row scheme (high/medium/low)
+// and the triage-finding scheme (critical/warning/low) so the same map styles
+// both the header badge and the situation-assessment findings.
 const SEVERITY = {
   critical: { color: "#EF4444", bg: "#FEE2E2", label: "Critical" },
+  high:     { color: "#EF4444", bg: "#FEE2E2", label: "High"     },
   warning:  { color: "#F97316", bg: "#FFEDD5", label: "Warning"  },
+  medium:   { color: "#F97316", bg: "#FFEDD5", label: "Medium"   },
   low:      { color: "#EAB308", bg: "#FEF9C3", label: "Low"      },
 };
 
@@ -47,12 +51,11 @@ const STATUS_STYLE = {
   WATCH: { color: "#1D4ED8", bg: "#DBEAFE" },
 };
 
-// Task status → colour + label.
-const TASK_STATUS = {
-  urgent:      { color: "#B91C1C", bg: "#FEE2E2", label: "Urgent"      },
-  open:        { color: "#1D4ED8", bg: "#DBEAFE", label: "Open"        },
-  in_progress: { color: "#B45309", bg: "#FEF3C7", label: "In Progress" },
-  done:        { color: "#15803D", bg: "#DCFCE7", label: "Done"        },
+// AI task priority → colour + label.
+const PRIORITY = {
+  high:   { color: "#B91C1C", bg: "#FEE2E2", label: "High"   },
+  medium: { color: "#C2410C", bg: "#FFEDD5", label: "Medium" },
+  low:    { color: "#166534", bg: "#DCFCE7", label: "Low"    },
 };
 
 // ─── Small helpers ──────────────────────────────────────────────────────────────
@@ -125,49 +128,47 @@ function SensorCard({ icon, label, value, status, pct }) {
   );
 }
 
-// ─── Task card ───────────────────────────────────────────────────────────────────
-// When `onClick` is provided (open / urgent tasks) the card becomes a button that
-// signs the user up to help with that specific task. Done / in-progress tasks are
-// passed no handler, so they render as plain, non-interactive cards.
-function TaskCard({ task, onClick }) {
-  const t = TASK_STATUS[task.status] ?? TASK_STATUS.open;
-  const clickable = typeof onClick === "function";
+// ─── AI task card ────────────────────────────────────────────────────────────────
+// Renders one LLM-generated task card from the triage endpoint (title, priority,
+// description, volunteers_needed). Clicking it signs the user up to help on this
+// crisis via the volunteer page.
+function AiTaskCard({ task, onClick }) {
+  const p = PRIORITY[task.priority] ?? PRIORITY.medium;
   return (
     <div
       onClick={onClick}
-      role={clickable ? "button" : undefined}
-      tabIndex={clickable ? 0 : undefined}
-      onKeyDown={clickable ? (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onClick(); } } : undefined}
+      role="button"
+      tabIndex={0}
+      onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onClick(); } }}
       style={{
         background: "#FBFAF7", border: "1px solid #ECE6DA", borderRadius: 12,
         padding: "12px 14px", display: "flex", flexDirection: "column", gap: 5,
-        cursor: clickable ? "pointer" : "default",
-        transition: "border-color 150ms, box-shadow 150ms, background 150ms",
+        cursor: "pointer", transition: "border-color 150ms, box-shadow 150ms, background 150ms",
       }}
-      onMouseEnter={clickable ? (e) => {
+      onMouseEnter={(e) => {
         e.currentTarget.style.borderColor = "#EF4444";
         e.currentTarget.style.boxShadow = "0 2px 10px rgba(239,68,68,0.14)";
         e.currentTarget.style.background = "#fff";
-      } : undefined}
-      onMouseLeave={clickable ? (e) => {
+      }}
+      onMouseLeave={(e) => {
         e.currentTarget.style.borderColor = "#ECE6DA";
         e.currentTarget.style.boxShadow = "none";
         e.currentTarget.style.background = "#FBFAF7";
-      } : undefined}
+      }}
     >
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10 }}>
         <span style={{ fontWeight: 800, fontSize: 14, color: INK }}>{task.title}</span>
-        <Badge color={t.color} bg={t.bg}>{t.label}</Badge>
+        <Badge color={p.color} bg={p.bg}>{p.label}</Badge>
       </div>
-      <span style={{ fontSize: 12.5, color: "#6B6B6B" }}>{task.note}</span>
-      {clickable && (
-        <span style={{
-          display: "inline-flex", alignItems: "center", gap: 2,
-          fontSize: 12, fontWeight: 800, color: "#EF4444", marginTop: 2,
-        }}>
+      {task.description && <span style={{ fontSize: 12.5, color: "#6B6B6B" }}>{task.description}</span>}
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, marginTop: 2 }}>
+        <span style={{ display: "inline-flex", alignItems: "center", gap: 4, fontSize: 11.5, fontWeight: 700, color: "#16A34A" }}>
+          <Users size={12} /> {task.volunteers_needed} volunteer{task.volunteers_needed === 1 ? "" : "s"} needed
+        </span>
+        <span style={{ display: "inline-flex", alignItems: "center", gap: 2, fontSize: 12, fontWeight: 800, color: "#EF4444" }}>
           Help with this <ChevronRight size={13} />
         </span>
-      )}
+      </div>
     </div>
   );
 }
@@ -191,33 +192,45 @@ export default function CrisisDetail() {
 
   const [crisis, setCrisis] = useState(null);
   const [loading, setLoading] = useState(true);
-  const [taskFilter, setTaskFilter] = useState("all"); // all | open | in_progress | done
   const [chatOpen, setChatOpen] = useState(false);      // Brainy drawer visibility
 
-  // A task is "claimable" (clickable to help) when it still needs volunteers.
-  const isClaimable = (t) => t.status === "open" || t.status === "urgent";
+  // Triage = Brainy's live LLM analysis for this crisis: cross-agency findings
+  // (situation assessment) + AI-generated volunteer tasks. Loaded separately
+  // from the crisis row because the LLM task generation is slower, so the page
+  // renders the crisis immediately and streams the analysis in when ready.
+  const [triage, setTriage] = useState(null);
+  const [triageLoading, setTriageLoading] = useState(true);
 
-  // Fetch the crisis whenever the id in the URL changes.
+  // Fetch the crisis + its triage whenever the id in the URL changes. The two
+  // run in parallel so the slow LLM call starts immediately.
   useEffect(() => {
     let cancelled = false; // guards against setting state after unmount
 
-    async function load() {
-      setLoading(true);
-      const apiUrl = import.meta.env.VITE_API_URL ?? "http://localhost:8080";
-      try {
-        const res = await fetch(`${apiUrl}/api/crises/${id}`);
-        if (!res.ok) throw new Error(`status ${res.status}`);
-        const data = await res.json();
-        if (!cancelled) setCrisis(data);
-      } catch {
-        // Backend unreachable or crisis not found — render the not-found state.
-        if (!cancelled) setCrisis(null);
-      } finally {
-        if (!cancelled) setLoading(false);
+    function load() {
+      // No id in the URL — skip the fetches entirely (avoids GET /api/crises/undefined)
+      // and fall straight through to the not-found state.
+      if (!id) {
+        setCrisis(null);
+        setLoading(false);
+        setTriageLoading(false);
+        return;
       }
+
+      setLoading(true);
+      setTriageLoading(true);
+
+      api.get(`/api/crises/${id}`)
+        .then((data) => { if (!cancelled) setCrisis(data); })
+        .catch(() => { if (!cancelled) setCrisis(null); })   // unreachable / not found → not-found state
+        .finally(() => { if (!cancelled) setLoading(false); });
+
+      api.get(`/api/crises/${id}/triage`)
+        .then((data) => { if (!cancelled) setTriage(data); })
+        .catch(() => { if (!cancelled) setTriage(null); })
+        .finally(() => { if (!cancelled) setTriageLoading(false); });
     }
 
-    load();
+    Promise.resolve().then(load); // defer so setState lands in an async callback
     return () => { cancelled = true; }; // cleanup runs if id changes / component unmounts
   }, [id]);
 
@@ -249,17 +262,19 @@ export default function CrisisDetail() {
   const sev = SEVERITY[crisis.severity] ?? SEVERITY.warning;
   const trend = trendVisual(crisis.trend);
   const sensors = crisis.sensors ?? {};
-  const tasks = crisis.tasks ?? [];
 
-  const openCount = tasks.filter((t) => t.status === "open" || t.status === "urgent").length;
-  const filteredTasks = tasks.filter((t) => {
-    if (taskFilter === "all") return true;
-    if (taskFilter === "open") return t.status === "open" || t.status === "urgent";
-    return t.status === taskFilter;
-  });
+  // Brainy's LLM analysis: situation-assessment findings + AI volunteer tasks.
+  // Capped to 6 to match the backend's maxTaskFindings (taskgen.go), which limits
+  // how many findings feed task generation in the first place.
+  const findings = triage?.findings ?? [];
+  const aiTasks = (triage?.tasks ?? []).slice(0, 6);
+
+  // The crisis row uses `description`; older mock rows used `summary`. Prefer
+  // whichever is present so Brainy's Brief always has text.
+  const summary = crisis.summary ?? crisis.description ?? "";
 
   // Helper count parsed from the summary ("12 volunteers active") — demo heuristic.
-  const helperMatch = (crisis.summary ?? "").match(/(\d+)\s+volunteers?/i);
+  const helperMatch = summary.match(/(\d+)\s+volunteers?/i);
   const helperCount = helperMatch ? helperMatch[1] : "—";
 
   return (
@@ -290,7 +305,7 @@ export default function CrisisDetail() {
               <div>
                 <h1 style={{ margin: 0, fontSize: 22, fontWeight: 900, lineHeight: 1.2 }}>{crisis.title}</h1>
                 <div style={{ display: "flex", gap: 14, marginTop: 6, color: "#666", fontSize: 13, fontWeight: 600, flexWrap: "wrap" }}>
-                  <span style={{ display: "inline-flex", alignItems: "center", gap: 4 }}><MapPin size={13} /> {crisis.address}</span>
+                  <span style={{ display: "inline-flex", alignItems: "center", gap: 4 }}><MapPin size={13} /> {crisis.address ?? crisis.location_name}</span>
                   <span style={{ display: "inline-flex", alignItems: "center", gap: 4 }}><Clock size={13} /> Updated {timeAgo(crisis.updated_at)}</span>
                 </div>
               </div>
@@ -315,9 +330,9 @@ export default function CrisisDetail() {
                   <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6, flexWrap: "wrap" }}>
                     <span style={{ fontWeight: 900, fontSize: 15 }}>Brainy's Brief</span>
                     <Badge color="#15803D" bg="#DCFCE7"><ShieldCheck size={12} /> High confidence</Badge>
-                    <Badge color={trend.color} bg={trend.bg}>{trend.icon} {crisis.trend}</Badge>
+                    {crisis.trend && <Badge color={trend.color} bg={trend.bg}>{trend.icon} {crisis.trend}</Badge>}
                   </div>
-                  <p style={{ margin: 0, fontSize: 14.5, lineHeight: 1.6, color: "#333" }}>{crisis.summary}</p>
+                  <p style={{ margin: 0, fontSize: 14.5, lineHeight: 1.6, color: "#333" }}>{summary}</p>
                   {/* Agency source tags */}
                   <div style={{ display: "flex", gap: 6, marginTop: 12, flexWrap: "wrap" }}>
                     {["NEA", "PUB", "LTA", "MOH"].map((a) => (
@@ -330,6 +345,55 @@ export default function CrisisDetail() {
                   </div>
                 </div>
               </div>
+            </Panel>
+
+            {/* ── 2b. Brainy's triage analysis (LLM situation assessment) ── */}
+            <Panel>
+              <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 12 }}>
+                <AlertTriangle size={16} color="#92400E" />
+                <h2 style={{ fontSize: 15, fontWeight: 900, margin: 0 }}>Situation assessment</h2>
+                <Badge color="#7C3AED" bg="#EDE9FE" style={{ fontSize: 11 }}><Sparkles size={11} /> AI triage</Badge>
+              </div>
+
+              {triageLoading && (
+                <p style={{ color: "#666", fontSize: 13.5, fontWeight: 600, padding: "8px 0" }}>
+                  Brainy is analysing this crisis…
+                </p>
+              )}
+
+              {!triageLoading && findings.length === 0 && (
+                <p style={{ color: "#666", fontSize: 13.5, fontWeight: 600, padding: "8px 0", lineHeight: 1.5 }}>
+                  No active triage findings for this crisis right now. The situation may have
+                  eased, or it isn't currently tied to a live signal.
+                </p>
+              )}
+
+              {!triageLoading && findings.length > 0 && (
+                <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+                  {findings.map((f, i) => {
+                    const fSev = SEVERITY[f.severity] ?? SEVERITY.warning;
+                    return (
+                      <div key={i} style={{
+                        background: f.cascade ? "#FFFBEB" : "#FAFAF7",
+                        border: `1px solid ${f.cascade ? "#FCD34D" : "#EFEAE1"}`,
+                        borderRadius: 12, padding: "12px 14px",
+                      }}>
+                        <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6 }}>
+                          <Badge color={fSev.color} bg={fSev.bg}>{fSev.label}</Badge>
+                          {f.cascade && <Badge color="#B45309" bg="#FEF3C7"><Layers size={11} /> Cascade</Badge>}
+                        </div>
+                        <div style={{ fontSize: 14, fontWeight: 800, color: INK, marginBottom: 3 }}>{f.title}</div>
+                        <div style={{ fontSize: 13, color: "#555", lineHeight: 1.5 }}>{f.detail}</div>
+                        {f.sources?.length > 0 && (
+                          <div style={{ fontSize: 11, fontWeight: 700, color: "#9A8F7D", marginTop: 7, letterSpacing: 0.3 }}>
+                            {f.sources.join(" · ")}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
             </Panel>
 
             {/* ── 3. Live data sources ── */}
@@ -363,62 +427,41 @@ export default function CrisisDetail() {
               </div>
             </div>
 
-            {/* ── 5. Task panel ── */}
+            {/* ── 5. AI-generated volunteer tasks ── */}
             <Panel>
+              <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 14 }}>
+                <ListTodo size={16} color="#92400E" />
+                <h2 style={{ fontSize: 15, fontWeight: 900, margin: 0 }}>Suggested volunteer tasks</h2>
+                <Badge color="#7C3AED" bg="#EDE9FE" style={{ fontSize: 11 }}><Sparkles size={11} /> AI generated</Badge>
+              </div>
+
               {/* Stats row */}
               <div style={{ display: "flex", gap: 10, marginBottom: 14, flexWrap: "wrap" }}>
                 <div style={{ display: "flex", alignItems: "center", gap: 7, background: "#F0FDF4", color: "#14532D", padding: "7px 14px", borderRadius: 12, fontWeight: 800, fontSize: 13 }}>
                   <Users size={15} /> {helperCount} helpers
                 </div>
                 <div style={{ display: "flex", alignItems: "center", gap: 7, background: "#FEF3C7", color: "#92400E", padding: "7px 14px", borderRadius: 12, fontWeight: 800, fontSize: 13 }}>
-                  <ListTodo size={15} /> {openCount} open tasks
+                  <ListTodo size={15} /> {aiTasks.length} suggested task{aiTasks.length === 1 ? "" : "s"}
                 </div>
-              </div>
-
-              {/* Filter tabs */}
-              <div style={{ display: "flex", gap: 6, marginBottom: 14, flexWrap: "wrap" }}>
-                {[
-                  { key: "all", label: "All" },
-                  { key: "open", label: "Open" },
-                  { key: "in_progress", label: "In Progress" },
-                  { key: "done", label: "Done" },
-                ].map((tab) => {
-                  const active = taskFilter === tab.key;
-                  return (
-                    <button
-                      key={tab.key}
-                      onClick={() => setTaskFilter(tab.key)}
-                      style={{
-                        cursor: "pointer", border: "none", borderRadius: 999,
-                        padding: "7px 14px", fontSize: 13, fontWeight: 800,
-                        fontFamily: "inherit",
-                        background: active ? INK : "#F0EDE5",
-                        color: active ? "#fff" : "#555",
-                        transition: "background 150ms, color 150ms",
-                      }}
-                    >
-                      {tab.label}
-                    </button>
-                  );
-                })}
               </div>
 
               {/* Task list */}
               <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-                {filteredTasks.length === 0 ? (
+                {triageLoading ? (
                   <p style={{ color: "#999", fontSize: 13.5, fontWeight: 600, textAlign: "center", padding: "16px 0" }}>
-                    No tasks in this category.
+                    Brainy is drafting volunteer tasks…
+                  </p>
+                ) : aiTasks.length === 0 ? (
+                  <p style={{ color: "#999", fontSize: 13.5, fontWeight: 600, textAlign: "center", padding: "16px 0" }}>
+                    No volunteer tasks suggested for this crisis right now.
                   </p>
                 ) : (
-                  filteredTasks.map((t) => (
-                    <TaskCard
-                      key={t.id}
+                  aiTasks.map((t, i) => (
+                    <AiTaskCard
+                      key={i}
                       task={t}
-                      // Only open / urgent tasks are clickable — they route to the
-                      // volunteer signup with this crisis + task pre-selected.
-                      onClick={isClaimable(t)
-                        ? () => navigate(`/volunteers?crisis_id=${crisis.id}&task_id=${t.id}`)
-                        : undefined}
+                      // Each card routes to the volunteer signup with this crisis pre-selected.
+                      onClick={() => navigate(`/volunteers?crisis_id=${crisis.id}`)}
                     />
                   ))
                 )}

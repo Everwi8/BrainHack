@@ -1,8 +1,8 @@
 import { useState, useEffect, useCallback } from "react";
+import { useNavigate } from "react-router-dom";
 import { BedDouble, House, TriangleAlert, FlaskConical, Radio } from "lucide-react";
 import Navbar from "../components/layout/NavBar";
 import MapView from "../components/map/MapView";
-import CrisisTriagePanel from "../components/map/CrisisTriagePanel";
 import BrainyMascot from "../components/BrainyMascot";
 import { api } from "../lib/api";
 
@@ -61,6 +61,7 @@ function FilterRow({ color, label, checked, onChange }) {
 
 // ─── Map page ─────────────────────────────────────────────────────────────────
 export default function Map() {
+  const navigate = useNavigate();
   // Each of these useState calls creates a piece of React state.
   // React re-renders the component whenever you call the setter (e.g. setCrises).
   const [crisis,    setCrisis]    = useState([]);
@@ -77,12 +78,6 @@ export default function Map() {
   // Demo/live data-source toggle (backed by /api/admin/data-source).
   const [mode, setMode]           = useState(null);  // "demo" | "live" | null while unknown
   const [switching, setSwitching] = useState(false);
-
-  // Per-crisis triage popup: which crisis is selected and its triage payload.
-  const [selected,      setSelected]      = useState(null); // the clicked crisis row
-  const [triage,        setTriage]        = useState(null); // { findings, tasks, ... }
-  const [triageLoading, setTriageLoading] = useState(false);
-  const [triageError,   setTriageError]   = useState(null);
 
   // loadCrises pulls the live crisis list from the backend.
   const loadCrises = useCallback(async () => {
@@ -118,21 +113,11 @@ export default function Map() {
     api.get("/api/admin/data-source").then(d => setMode(d.mode)).catch(() => {});
   }, [loadCrises]);
 
-  // Clicking a crisis circle loads that crisis's triage (findings + tasks).
-  const handleSelectCrisis = useCallback(async (c) => {
-    setSelected(c);
-    setTriage(null);
-    setTriageError(null);
-    setTriageLoading(true);
-    try {
-      const data = await api.get(`/api/crises/${c.id}/triage`);
-      setTriage(data);
-    } catch (err) {
-      setTriageError(err.message || "Could not load triage.");
-    } finally {
-      setTriageLoading(false);
-    }
-  }, []);
+  // Clicking a crisis circle opens that crisis's detail page, where Brainy runs
+  // the LLM triage analysis and suggests volunteer tasks.
+  const handleSelectCrisis = useCallback((c) => {
+    navigate(`/crises/${c.id}`);
+  }, [navigate]);
 
   // Flip the backend triage data source between demo and live, then reload.
   const handleToggleMode = useCallback(async () => {
@@ -143,8 +128,6 @@ export default function Map() {
     try {
       const d = await api.post("/api/admin/data-source", { mode: next });
       setMode(d.mode);
-      setSelected(null);
-      setTriage(null);
       await loadCrises();
     } catch (err) {
       console.error("toggle data source:", err);
@@ -209,7 +192,7 @@ export default function Map() {
       <div className="map-body">
 
         {/* Map area — flex:1 makes it take all remaining horizontal space.
-            position:relative so the triage popup can overlay it. */}
+            Clicking a crisis marker navigates to its detail page. */}
         <div style={{ position: "relative", flex: 1, borderRadius: 16, overflow: "hidden", minHeight: 580 }}>
           {/*
             We pass pre-filtered arrays into MapView.
@@ -225,17 +208,6 @@ export default function Map() {
             loading={loading}
             onCrisisSelect={handleSelectCrisis}
           />
-
-          {/* Triage popup — appears when a crisis circle is clicked. */}
-          {selected && (
-            <CrisisTriagePanel
-              crisis={selected}
-              data={triage}
-              loading={triageLoading}
-              error={triageError}
-              onClose={() => { setSelected(null); setTriage(null); setTriageError(null); }}
-            />
-          )}
         </div>
 
         {/* ── Sidebar ── */}

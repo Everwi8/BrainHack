@@ -7,6 +7,7 @@ import Help from "./pages/Help";
 import Map from "./pages/Map";
 import Chat from "./pages/Chat";
 import CrisisDetail from "./pages/CrisisDetail";
+import Tasks from "./pages/Tasks";
 import Timeline from "./pages/Timeline";
 import Volunteers from "./pages/Volunteers";
 import ReportCrisis from "./pages/ReportCrisis";
@@ -28,7 +29,7 @@ export default function App() {
           <Route path="/help" element={<Protected><Help /></Protected>} />
           <Route path="/map" element={<Protected><Map /></Protected>} />
           <Route path="/chat" element={<Protected><Chat /></Protected>} />
-          <Route path="/crisis" element={<Protected><CrisisDetail /></Protected>} />
+          <Route path="/tasks" element={<Protected><Tasks /></Protected>} />
           <Route path="/crises/:id" element={<Protected><CrisisDetail /></Protected>} />
           <Route path="/timeline" element={<Protected><Timeline /></Protected>} />
           <Route path="/volunteers" element={<Protected><Volunteers /></Protected>} />
