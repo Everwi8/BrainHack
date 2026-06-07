@@ -52,21 +52,39 @@ func ChatPhoto(c *gin.Context) {
 
 	dataURL := fmt.Sprintf("data:%s;base64,%s", mime, base64.StdEncoding.EncodeToString(data))
 
-	sessionID := c.PostForm("session_id")
-	if sessionID == "" {
-		sessionID = newSessionID()
-	}
 	caption := c.PostForm("caption")
+	userID := c.GetString("userID")
 
-	reply, obs, err := lib.VisionLLM(sessionID, caption, dataURL)
+	// Title a photo-started session from the caption, or a sensible default.
+	newTitle := deriveTitle(caption)
+	if newTitle == defaultChatTitle {
+		newTitle = "Photo report"
+	}
+	session, err := resolveSession(userID, c.PostForm("session_id"), newTitle)
 	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "chat session not found"})
+		return
+	}
+
+	reply, obs, updated, err := lib.VisionTurn(session.Messages, caption, dataURL)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	title := session.Title
+	if title == "" || title == defaultChatTitle {
+		title = newTitle
+	}
+	if err := lib.DB.SaveChatMessages(session.ID, updated, title); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
 
 	resp := gin.H{
 		"reply":      reply,
-		"session_id": sessionID,
+		"session_id": session.ID,
+		"title":      title,
 	}
 	if obs != nil {
 		if finding, ok := lib.ObservationToFinding(*obs, caption); ok {

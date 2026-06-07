@@ -68,9 +68,14 @@ func main() {
 		api.PATCH("/tasks/:id", middleware.RequireAuth(), handler.UpdateTask)
 		api.DELETE("/tasks/:id", middleware.RequireAuth(), handler.DeleteTask)
 
-		// Perrin — AI chat + triage
-		api.POST("/chat", handler.Chat)
-		api.POST("/chat/photo", handler.ChatPhoto)
+		// Perrin — AI chat + triage. Chat requires auth so each user's
+		// conversation history is keyed to their account and isolated from others.
+		api.POST("/chat", middleware.RequireAuth(), handler.Chat)
+		api.POST("/chat/photo", middleware.RequireAuth(), handler.ChatPhoto)
+		api.GET("/chat/sessions", middleware.RequireAuth(), handler.ListChatSessions)
+		api.POST("/chat/sessions", middleware.RequireAuth(), handler.CreateChatSession)
+		api.GET("/chat/sessions/:id", middleware.RequireAuth(), handler.GetChatSession)
+		api.DELETE("/chat/sessions/:id", middleware.RequireAuth(), handler.DeleteChatSession)
 		api.GET("/triage", handler.Triage)
 		api.GET("/triage/tasks", handler.TriageTasks)
 

@@ -1,99 +1,12 @@
-import { useState, useRef, useEffect } from "react";
-import { Waves, House, Zap, AlertTriangle, Activity, Bot, X } from "lucide-react";
+import { useState, useRef, useEffect, useCallback } from "react";
+import { Waves, House, Zap, AlertTriangle, Activity, Bot, X, Plus, MessageSquare, Trash2 } from "lucide-react";
 import Navbar from "../components/layout/NavBar";
 import BrainyMascot from "../components/BrainyMascot";
 import MessageBubble from "../components/chat/MessageBubble";
 import ChatInput from "../components/chat/ChatInput";
-import InlineShelterCard from "../components/chat/InlineShelterCard";
-import InlineHospitalCard from "../components/chat/InlineHospitalCard";
 import InlineCrisisCard from "../components/chat/InlineCrisisCard";
 import { api } from "../lib/api";
 import { useVoiceRecorder, extensionFromMime } from "../lib/useVoiceRecorder";
-
-// ── Mock responses (swap out for real API call when backend is ready) ──────────
-const MOCK_RESPONSES = {
-  flood: {
-    text: "Current flood alerts in your area:\n• **Pasir Ris Drive 3** — Active (water level rising)\n• **Tampines Ave 5** — Warning\n\nAvoid flooded roads and move valuables to higher ground. Do you want me to show nearby evacuation routes?",
-    crisisCard: {
-      type: "flood", severity: "critical",
-      title: "Flash flood: Pasir Ris Dr 3",
-      location: "Pasir Ris Drive 3, near Block 512",
-      detail: "Water level at 88% of capacity — flooding likely. Avoid the area and move to higher ground.",
-    },
-  },
-  shelter: {
-    text: "Here are the nearest emergency shelters to your current location:",
-    shelterCard: { name: "Pasir Ris Community Club", distance: "400m away", status: "Open" },
-  },
-  hospital: {
-    text: "Here are the nearest hospitals and their latest reported bed availability:",
-    hospitalCard: { name: "Changi General Hospital", distance: "2.3 km away", beds: 42, total: 180 },
-  },
-  situation: {
-    text: "Here's the most urgent situation near you right now:",
-    crisisCard: {
-      type: "cascade", severity: "critical",
-      title: "Flash-flood cascade: Pasir Ris Dr 3",
-      location: "Pasir Ris Drive 3",
-      detail: "Heavy thundery showers over Pasir Ris while the canal is at 88% capacity — flash flooding likely within the hour. Avoid underpasses and low-lying roads.",
-    },
-  },
-  haze: {
-    text: "The PSI reading is currently **42 (Good)** islandwide. Haze has cleared and outdoor activities are safe for now. I'll notify you if conditions change.",
-  },
-  help: {
-    text: "I can help you with:\n• **Floods** — real-time water level alerts\n• **Shelters** — nearest open shelters near you\n• **Haze** — air quality & PSI readings\n• **Incidents** — report something you see nearby\n\nWhat do you need right now?",
-  },
-  "find out more": {
-    text: "**BrainySG** monitors live feeds from NEA, PUB, and SCDF to keep you informed during emergencies. I can guide you to safety, find shelters, or help you report incidents. What would you like to explore?",
-  },
-  incident: {
-    text: "To report an incident, I'll need a few details:\n1. What type of incident is it? (flood, fire, medical, etc.)\n2. What is the exact location?\n3. Are there injuries?\n\nYou can also tap the **camera icon** to attach a photo.",
-  },
-  safe: {
-    text: "Glad to hear you're safe! Stay indoors if possible and keep monitoring alerts. I'm here if anything changes — just message me.",
-  },
-  default: {
-    text: "I'm here to help! You can ask me about **flood alerts**, **nearby shelters**, **haze levels**, or tap one of the quick buttons below. What do you need?",
-  },
-};
-
-function getBotResponse(text) {
-  const lower = text.toLowerCase();
-  if (lower.includes("hospital") || lower.includes("bed") || lower.includes("medical")) return MOCK_RESPONSES.hospital;
-  if (lower.includes("situation") || lower.includes("summary") || lower.includes("happening")) return MOCK_RESPONSES.situation;
-  if (lower.includes("flood") || lower.includes("water"))       return MOCK_RESPONSES.flood;
-  if (lower.includes("shelter") || lower.includes("evacuate"))  return MOCK_RESPONSES.shelter;
-  if (lower.includes("haze") || lower.includes("psi") || lower.includes("air")) return MOCK_RESPONSES.haze;
-  if (lower.includes("help") || lower.includes("assist"))       return MOCK_RESPONSES.help;
-  if (lower.includes("find out") || lower.includes("more info")) return MOCK_RESPONSES["find out more"];
-  if (lower.includes("incident") || lower.includes("report"))   return MOCK_RESPONSES.incident;
-  if (lower.includes("safe") || lower.includes("okay") || lower.includes("ok")) return MOCK_RESPONSES.safe;
-  return MOCK_RESPONSES.default;
-}
-// ─────────────────────────────────────────────────────────────────────────────
-
-const INITIAL_MESSAGES = [
-  {
-    id: 1,
-    role: "bot",
-    text: "Good morning, John! It looks like there's a **Flash Flood** warning near Pasir Ris Drive 3. Are you currently in that area? I can provide safety instructions or show you the nearest shelters.",
-    timestamp: "09:41 AM",
-  },
-  {
-    id: 2,
-    role: "user",
-    text: "I'm nearby. Can you show me where the nearest shelters are? Also, is there any haze report today?",
-    timestamp: "09:42 AM",
-  },
-  {
-    id: 3,
-    role: "bot",
-    text: "Haze has cleared islandwide! Regarding shelters, here is the closest one to your current location:",
-    timestamp: "09:42 AM",
-    shelterCard: { name: "Pasir Ris Community Club", distance: "400m away", status: "Open" },
-  },
-];
 
 const QUICK_CHIPS = [
   { label: "Situation",     Icon: Activity,       color: "#0F766E", bg: "#CCFBF1", action: "situation" },
@@ -143,10 +56,11 @@ function TypingIndicator() {
 }
 
 export default function Chat() {
-  const [messages, setMessages] = useState(INITIAL_MESSAGES);
+  const [messages, setMessages] = useState([]);
   const [input, setInput] = useState("");
   const [isTyping, setIsTyping] = useState(false);
   const [sessionId, setSessionId] = useState(null);
+  const [sessions, setSessions] = useState([]);             // previous chats (sidebar)
   const [pendingImage, setPendingImage] = useState(null);   // { file, url }
   const [isTranscribing, setIsTranscribing] = useState(false);
   const { isRecording, start: startRecording, stop: stopRecording } = useVoiceRecorder();
@@ -155,6 +69,54 @@ export default function Chat() {
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages, isTyping]);
+
+  // loadSessions refreshes the "previous chats" list for the signed-in user.
+  const loadSessions = useCallback(async () => {
+    try {
+      const res = await api.get("/api/chat/sessions");
+      setSessions(Array.isArray(res.sessions) ? res.sessions : []);
+    } catch {
+      setSessions([]); // not logged in / backend down — just show no history
+    }
+  }, []);
+
+  useEffect(() => { loadSessions(); }, [loadSessions]);
+
+  // newChat clears the view so the next message starts a fresh session
+  // (the backend creates the row on first send).
+  const newChat = () => {
+    if (isTyping) return;
+    setSessionId(null);
+    setMessages([]);
+    setInput("");
+  };
+
+  // openSession loads a past conversation's transcript into the view.
+  const openSession = async (id) => {
+    if (isTyping || id === sessionId) return;
+    try {
+      const res = await api.get(`/api/chat/sessions/${id}`);
+      setSessionId(res.id);
+      setMessages((res.messages ?? []).map(m => ({
+        id: m.id, role: m.role, text: m.text,
+      })));
+    } catch (err) {
+      setMessages([{ id: Date.now(), role: "bot", timestamp: nowTime(),
+        text: `Sorry, I couldn't open that chat. ${err.message}` }]);
+    }
+  };
+
+  // deleteSession removes a past conversation; if it's the open one, reset.
+  const deleteSession = async (id, e) => {
+    e.stopPropagation();
+    try {
+      await api.delete(`/api/chat/sessions/${id}`);
+      setSessions(prev => prev.filter(s => s.id !== id));
+      if (id === sessionId) newChat();
+    } catch {
+      /* ignore — leave the list as-is on failure */
+    }
+  };
 
   const handlePickImage = (file) => {
     // Replacing an un-sent preview: free the old object URL first.
@@ -193,6 +155,7 @@ export default function Chat() {
         id: Date.now(), role: "bot", text: res.reply, timestamp: nowTime(),
         crisisCard: res.crisis_card ?? undefined,
       }]);
+      loadSessions(); // refresh sidebar order/title (and pick up a new session)
     } catch (err) {
       setMessages(prev => [...prev, {
         id: Date.now(), role: "bot",
@@ -213,26 +176,18 @@ export default function Chat() {
     setInput("");
     setIsTyping(true);
 
-    // Inline rich cards are still keyword-driven from mock data until Sanjey's
-    // crisis/shelter/hospital endpoints are live; we attach them to whichever
-    // reply we end up showing (real or fallback).
-    const mock = getBotResponse(trimmed);
-    const cards = {
-      shelterCard: mock.shelterCard,
-      hospitalCard: mock.hospitalCard,
-      crisisCard: mock.crisisCard,
-    };
-
     try {
       const res = await api.post("/api/chat", { message: trimmed, session_id: sessionId });
       if (res.session_id) setSessionId(res.session_id);
       setMessages(prev => [...prev, {
-        id: Date.now(), role: "bot", text: res.reply, timestamp: nowTime(), ...cards,
+        id: Date.now(), role: "bot", text: res.reply, timestamp: nowTime(),
       }]);
-    } catch {
-      // Backend unreachable — degrade gracefully to the canned response so the
-      // demo keeps working offline.
-      setMessages(prev => [...prev, { id: Date.now(), role: "bot", timestamp: nowTime(), ...mock }]);
+      loadSessions(); // refresh sidebar order/title (and pick up a new session)
+    } catch (err) {
+      setMessages(prev => [...prev, {
+        id: Date.now(), role: "bot", timestamp: nowTime(),
+        text: `Sorry, I couldn't reach Brainy just now. ${err.message}`,
+      }]);
     } finally {
       setIsTyping(false);
     }
@@ -265,8 +220,11 @@ export default function Chat() {
           crisisCards: top,
         }]);
       }
-    } catch {
-      setMessages(prev => [...prev, { id: Date.now(), role: "bot", timestamp: nowTime(), ...MOCK_RESPONSES.situation }]);
+    } catch (err) {
+      setMessages(prev => [...prev, {
+        id: Date.now(), role: "bot", timestamp: nowTime(),
+        text: `Sorry, I couldn't load the current situation. ${err.message}`,
+      }]);
     } finally {
       setIsTyping(false);
     }
@@ -341,6 +299,81 @@ export default function Chat() {
                 : "Your personal emergency buddy. I can help you find shelters, check flood levels, or report incidents nearby."}
             </div>
           </div>
+
+          {/* ── Previous chats ── */}
+          <div style={{
+            background: "#fff", borderRadius: 20, padding: "16px 16px 12px",
+            boxShadow: "0 2px 12px rgba(0,0,0,0.08)", width: "100%",
+            display: "flex", flexDirection: "column", minHeight: 0, flex: 1,
+          }}>
+            <button
+              onClick={newChat}
+              disabled={isTyping}
+              style={{
+                display: "flex", alignItems: "center", justifyContent: "center", gap: 8,
+                background: "#0F766E", color: "#fff", border: "none", borderRadius: 12,
+                padding: "10px 14px", fontFamily: "'Nunito', sans-serif", fontWeight: 800,
+                fontSize: 14, cursor: isTyping ? "not-allowed" : "pointer",
+                opacity: isTyping ? 0.5 : 1, marginBottom: 12, flexShrink: 0,
+              }}
+            >
+              <Plus size={16} /> New chat
+            </button>
+
+            <div style={{
+              fontSize: 11, fontWeight: 800, letterSpacing: 0.7, textTransform: "uppercase",
+              color: "#9CA3AF", marginBottom: 8, flexShrink: 0,
+            }}>
+              Previous chats
+            </div>
+
+            <div style={{ overflowY: "auto", flex: 1, minHeight: 0 }}>
+              {sessions.length === 0 ? (
+                <div style={{ fontSize: 13, color: "#9CA3AF", padding: "6px 2px" }}>
+                  No previous chats yet.
+                </div>
+              ) : (
+                sessions.map(s => {
+                  const active = s.id === sessionId;
+                  return (
+                    <div
+                      key={s.id}
+                      onClick={() => openSession(s.id)}
+                      style={{
+                        display: "flex", alignItems: "center", gap: 8,
+                        padding: "9px 10px", borderRadius: 10, marginBottom: 4,
+                        cursor: "pointer",
+                        background: active ? "#CCFBF1" : "transparent",
+                        color: active ? "#0F766E" : "#374151",
+                      }}
+                      onMouseEnter={e => { if (!active) e.currentTarget.style.background = "#F3F4F6"; }}
+                      onMouseLeave={e => { if (!active) e.currentTarget.style.background = "transparent"; }}
+                    >
+                      <MessageSquare size={15} style={{ flexShrink: 0 }} />
+                      <span style={{
+                        flex: 1, fontSize: 13, fontWeight: 600,
+                        whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis",
+                      }}>
+                        {s.title || "New chat"}
+                      </span>
+                      <button
+                        onClick={(e) => deleteSession(s.id, e)}
+                        title="Delete chat"
+                        style={{
+                          background: "none", border: "none", cursor: "pointer", padding: 3,
+                          borderRadius: 6, display: "flex", flexShrink: 0, color: "#9CA3AF",
+                        }}
+                        onMouseEnter={e => e.currentTarget.style.color = "#DC2626"}
+                        onMouseLeave={e => e.currentTarget.style.color = "#9CA3AF"}
+                      >
+                        <Trash2 size={14} />
+                      </button>
+                    </div>
+                  );
+                })
+              )}
+            </div>
+          </div>
         </div>
 
         {/* ── Chat area ── */}
@@ -365,21 +398,6 @@ export default function Chat() {
                       maxWidth: "100%", borderRadius: 12, marginTop: msg.text ? 8 : 0,
                       display: "block",
                     }}
-                  />
-                )}
-                {msg.shelterCard && (
-                  <InlineShelterCard
-                    name={msg.shelterCard.name}
-                    distance={msg.shelterCard.distance}
-                    status={msg.shelterCard.status}
-                  />
-                )}
-                {msg.hospitalCard && (
-                  <InlineHospitalCard
-                    name={msg.hospitalCard.name}
-                    distance={msg.hospitalCard.distance}
-                    beds={msg.hospitalCard.beds}
-                    total={msg.hospitalCard.total}
                   />
                 )}
                 {msg.crisisCard && (

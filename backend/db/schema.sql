@@ -82,6 +82,22 @@ CREATE TABLE IF NOT EXISTS reports (
   created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
+-- ─── Chat sessions ───────────────────────────────────────────────────────────
+-- One row per conversation. The whole conversation lives in the `messages`
+-- JSONB column as an array of {role, content} turns (system prompt + live triage
+-- context are rebuilt at request time, so they are NOT stored here). Every read
+-- and write is filtered by user_id so one user can never reach another's chats.
+CREATE TABLE IF NOT EXISTS chat_sessions (
+  id         UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id    UUID        NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  title      TEXT        NOT NULL DEFAULT 'New chat',
+  messages   JSONB       NOT NULL DEFAULT '[]'::jsonb,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_chat_sessions_user ON chat_sessions(user_id, updated_at DESC);
+
 -- ─── auto-updated updated_at ─────────────────────────────────────────────────
 CREATE OR REPLACE FUNCTION set_updated_at()
 RETURNS TRIGGER AS $$
@@ -101,4 +117,8 @@ CREATE OR REPLACE TRIGGER trg_tasks_updated_at
 
 CREATE OR REPLACE TRIGGER trg_volunteers_updated_at
   BEFORE UPDATE ON volunteers
+  FOR EACH ROW EXECUTE FUNCTION set_updated_at();
+
+CREATE OR REPLACE TRIGGER trg_chat_sessions_updated_at
+  BEFORE UPDATE ON chat_sessions
   FOR EACH ROW EXECUTE FUNCTION set_updated_at();

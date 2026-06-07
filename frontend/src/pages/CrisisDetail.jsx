@@ -1,6 +1,5 @@
 // Jerald — Crisis Detail view.
-// Reads :id from the URL, fetches that crisis from the backend (GET /api/crises/:id),
-// and falls back to local mock data if the backend isn't running.
+// Reads :id from the URL and fetches that crisis from the backend (GET /api/crises/:id).
 //
 // Sections: Header · Brainy's Brief · Live sensor cards · Area mini-map · Task panel · "I want to help"
 
@@ -15,7 +14,15 @@ import {
 import Navbar from "../components/layout/NavBar";
 import BrainyMascot from "../components/BrainyMascot";
 import BrainyDrawer from "../components/crisis/BrainyDrawer";
-import { mockCrisis, mockHelpers } from "../lib/mockData";
+
+// Placeholder "nearby helpers" for the mini-map until James's live volunteer
+// locations (GET /api/volunteers) are wired up — that endpoint is still a stub.
+// Each entry is a small lat/lng offset applied around the crisis epicentre.
+const NEARBY_HELPERS = [
+  { id: "h1", name: "Aisha",    dLat:  0.0016, dLng:  0.0013, skill: "Medical" },
+  { id: "h2", name: "Wei Ming", dLat: -0.0012, dLng:  0.0019, skill: "Has car" },
+  { id: "h3", name: "CERT T4",  dLat:  0.0009, dLng: -0.0016, skill: "CERT" },
+];
 
 // ─── Design tokens (match the rest of the app) ─────────────────────────────────
 const CREAM   = "#F5F0E8";
@@ -203,10 +210,8 @@ export default function CrisisDetail() {
         const data = await res.json();
         if (!cancelled) setCrisis(data);
       } catch {
-        // Backend not running (or 404) — fall back to local mock data so the
-        // page still works during frontend-only development.
-        const fallback = mockCrisis.find((c) => c.id === id) ?? null;
-        if (!cancelled) setCrisis(fallback);
+        // Backend unreachable or crisis not found — render the not-found state.
+        if (!cancelled) setCrisis(null);
       } finally {
         if (!cancelled) setLoading(false);
       }
@@ -445,9 +450,9 @@ export default function CrisisDetail() {
                     radius={11}
                     pathOptions={{ color: "#fff", weight: 3, fillColor: sev.color, fillOpacity: 1 }}
                   />
-                  {/* Nearby helpers (MOCK — swap for James's live volunteer locations).
+                  {/* Nearby helpers (placeholder — swap for James's live volunteer locations).
                       Each helper sits at a small offset from the crisis epicentre. */}
-                  {mockHelpers.map((h) => (
+                  {NEARBY_HELPERS.map((h) => (
                     <CircleMarker
                       key={h.id}
                       center={[crisis.lat + h.dLat, crisis.lng + h.dLng]}
@@ -476,7 +481,7 @@ export default function CrisisDetail() {
                   display: "inline-flex", alignItems: "center", gap: 6,
                 }}>
                   <span style={{ width: 9, height: 9, borderRadius: "50%", background: "#16A34A", display: "block" }} />
-                  {mockHelpers.length} helpers nearby
+                  {NEARBY_HELPERS.length} helpers nearby
                 </div>
 
                 <Link to="/map" style={{

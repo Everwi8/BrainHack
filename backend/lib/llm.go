@@ -11,7 +11,6 @@ import (
 	"os"
 	"strconv"
 	"strings"
-	"sync"
 	"time"
 )
 
@@ -80,31 +79,29 @@ type llmResponse struct {
 	} `json:"error,omitempty"`
 }
 
-// sessionStore holds per-session conversation history (in-memory, MVP).
-var sessionStore sync.Map
+// maxStoredTurns bounds how many conversation turns we keep (and persist) per
+// session, so prompts and the stored JSONB stay within sane limits.
+const maxStoredTurns = 40
 
-func getHistory(sessionID string) []Message {
-	if v, ok := sessionStore.Load(sessionID); ok {
-		return append([]Message{}, v.([]Message)...)
-	}
-	// Seed a new session with the persona plus a live triage snapshot so
-	// Brainy's answers reflect the current situation. The triage block is
-	// empty (and skipped) if the data layer is unavailable or quiet.
-	msgs := []Message{{Role: "system", Content: brainySystem}}
+// assemblePrompt builds the full message list sent to the model: the persona,
+// then a live triage snapshot (rebuilt fresh each call so it is never stale),
+// then the stored conversation turns. The persona/triage system messages are
+// deliberately NOT persisted — only the turns are.
+func assemblePrompt(turns []Message) []Message {
+	msgs := make([]Message, 0, len(turns)+2)
+	msgs = append(msgs, Message{Role: "system", Content: brainySystem})
 	if ctx := currentTriageContext(); ctx != "" {
 		msgs = append(msgs, Message{Role: "system", Content: ctx})
 	}
-	return msgs
+	return append(msgs, turns...)
 }
 
-func appendHistory(sessionID string, msgs ...Message) {
-	history := getHistory(sessionID)
-	history = append(history, msgs...)
-	// Keep system prompt + last 20 turns to stay within context limits
-	if len(history) > 21 {
-		history = append(history[:1], history[len(history)-20:]...)
+// trimTurns keeps only the most recent maxStoredTurns messages.
+func trimTurns(turns []Message) []Message {
+	if len(turns) > maxStoredTurns {
+		return append([]Message{}, turns[len(turns)-maxStoredTurns:]...)
 	}
-	sessionStore.Store(sessionID, history)
+	return turns
 }
 
 // llmConfig resolves the endpoint settings from the environment, applying
@@ -218,18 +215,20 @@ func postCompletion(baseURL string, payload []byte) (string, error) {
 	return "", fmt.Errorf("LLM failed after %d attempts: %w", maxRetries, lastErr)
 }
 
-// ChatLLM sends a user message and returns Brainy's reply, maintaining history.
-func ChatLLM(sessionID, userMessage string) (string, error) {
-	appendHistory(sessionID, Message{Role: "user", Content: userMessage})
-	history := getHistory(sessionID)
+// ChatTurn runs one text exchange. It takes the conversation's prior turns,
+// appends the user message, asks Brainy, and returns the reply along with the
+// updated (trimmed) turns for the caller to persist. It is stateless — storage
+// lives in the handler/DB layer, keyed to the authenticated user.
+func ChatTurn(turns []Message, userMessage string) (reply string, updated []Message, err error) {
+	turns = append(turns, Message{Role: "user", Content: userMessage})
 
-	reply, err := chatCompletion(history, reasoningOn)
+	reply, err = chatCompletion(assemblePrompt(turns), reasoningOn)
 	if err != nil {
-		return "", err
+		return "", nil, err
 	}
 
-	appendHistory(sessionID, Message{Role: "assistant", Content: reply})
-	return reply, nil
+	turns = append(turns, Message{Role: "assistant", Content: reply})
+	return reply, trimTurns(turns), nil
 }
 
 // noThinkDirective disables chain-of-thought on NVIDIA Nemotron models, which
@@ -404,22 +403,41 @@ func ExtractPhotoObservation(caption, imageDataURL string) (PhotoObservation, er
 	return obs, nil
 }
 
-// VisionLLM is the hybrid photo pipeline: the vision model extracts a
-// structured observation, then the stronger text model turns that into
-// Brainy's user-facing answer (with full session context and persona). The
-// exchange is recorded in session history so follow-up text chat keeps the
-// photo context. If structured extraction fails, it degrades gracefully to a
-// single direct-vision prose call (obs is nil on that path).
-func VisionLLM(sessionID, caption, imageDataURL string) (reply string, obs *PhotoObservation, err error) {
+// VisionTurn is the stateless hybrid photo pipeline: the vision model extracts
+// a structured observation, then the stronger text model turns that (plus the
+// prior turns and persona) into Brainy's answer. It returns the reply, the
+// parsed observation (nil on the prose fallback), and the updated turns for the
+// caller to persist.
+//
+// What gets persisted for the user's turn is a short "[Shared a photo]" trace,
+// not the verbose machine analysis: the analysis is fed to the model for this
+// one call only, so reloading the conversation later shows something readable
+// while the assistant's own reply still carries the context forward.
+func VisionTurn(turns []Message, caption, imageDataURL string) (reply string, obs *PhotoObservation, updated []Message, err error) {
+	userTrace := "[Shared a photo]"
+	if caption != "" {
+		userTrace += " " + caption
+	}
+
 	extracted, extractErr := ExtractPhotoObservation(caption, imageDataURL)
 	if extractErr != nil {
-		reply, err = visionProseDirect(sessionID, caption, imageDataURL)
-		return // obs stays nil on the prose-fallback path
+		// Fallback: the vision model writes the answer itself in one call.
+		userPrompt := visionProseFallback
+		if caption != "" {
+			userPrompt += "\n\nUser's note about the photo: " + caption
+		}
+		reply, err = callVisionModel(brainySystem, userPrompt, imageDataURL)
+		if err != nil {
+			return "", nil, nil, err
+		}
+		turns = append(turns,
+			Message{Role: "user", Content: userTrace},
+			Message{Role: "assistant", Content: reply})
+		return reply, nil, trimTurns(turns), nil
 	}
 	obs = &extracted
 
-	// Hand the structured facts to the text model as a user turn. Storing this
-	// in history (rather than the raw image) gives later text turns context.
+	// Build the detailed analysis turn used only for this call (not persisted).
 	var b strings.Builder
 	b.WriteString("The user shared a photo. An automated vision system analysed it:\n")
 	fmt.Fprintf(&b, "- Type: %s\n- Severity: %s\n", obs.CrisisType, obs.Severity)
@@ -438,31 +456,14 @@ func VisionLLM(sessionID, caption, imageDataURL string) (reply string, obs *Phot
 	}
 	b.WriteString("\nRespond to the user about this photo: briefly describe the situation based only on these findings (do not invent details), then give the most important safety actions.")
 
-	appendHistory(sessionID, Message{Role: "user", Content: b.String()})
-	reply, err = chatCompletion(getHistory(sessionID), reasoningOn)
+	promptTurns := append(append([]Message{}, turns...), Message{Role: "user", Content: b.String()})
+	reply, err = chatCompletion(assemblePrompt(promptTurns), reasoningOn)
 	if err != nil {
-		return
-	}
-	appendHistory(sessionID, Message{Role: "assistant", Content: reply})
-	return
-}
-
-// visionProseDirect is the fallback single-call path (vision model writes the
-// answer itself) used when structured extraction can't be parsed.
-func visionProseDirect(sessionID, caption, imageDataURL string) (string, error) {
-	userPrompt := visionProseFallback
-	if caption != "" {
-		userPrompt += "\n\nUser's note about the photo: " + caption
-	}
-	reply, err := callVisionModel(brainySystem, userPrompt, imageDataURL)
-	if err != nil {
-		return "", err
+		return "", nil, nil, err
 	}
 
-	userTrace := "[Shared a photo]"
-	if caption != "" {
-		userTrace += " " + caption
-	}
-	appendHistory(sessionID, Message{Role: "user", Content: userTrace}, Message{Role: "assistant", Content: reply})
-	return reply, nil
+	turns = append(turns,
+		Message{Role: "user", Content: userTrace},
+		Message{Role: "assistant", Content: reply})
+	return reply, obs, trimTurns(turns), nil
 }

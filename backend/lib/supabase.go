@@ -244,3 +244,84 @@ func (c *Client) CreateUser(user User) (*User, error) {
 	}
 	return &rows[0], nil
 }
+
+// ─── Chat sessions ───────────────────────────────────────────────────────────
+
+// ChatSession is one persisted conversation. Messages holds the full transcript
+// ([]Message) and maps to the JSONB column. Listing endpoints omit Messages
+// (via select) so the sidebar payload stays small.
+type ChatSession struct {
+	ID        string    `json:"id,omitempty"`
+	UserID    string    `json:"user_id,omitempty"`
+	Title     string    `json:"title,omitempty"`
+	Messages  []Message `json:"messages,omitempty"`
+	CreatedAt time.Time `json:"created_at,omitempty"`
+	UpdatedAt time.Time `json:"updated_at,omitempty"`
+}
+
+// CreateChatSession starts a new conversation owned by userID.
+func (c *Client) CreateChatSession(userID, title string) (*ChatSession, error) {
+	body := map[string]interface{}{
+		"user_id":  userID,
+		"title":    title,
+		"messages": []Message{},
+	}
+	data, err := c.req("POST", "chat_sessions", body, nil)
+	if err != nil {
+		return nil, err
+	}
+	var rows []ChatSession
+	if err := json.Unmarshal(data, &rows); err != nil || len(rows) == 0 {
+		return nil, fmt.Errorf("create chat session failed")
+	}
+	return &rows[0], nil
+}
+
+// ListChatSessions returns the user's conversations newest-first, without the
+// (potentially large) message transcripts — just enough for a sidebar.
+func (c *Client) ListChatSessions(userID string) ([]ChatSession, error) {
+	path := "chat_sessions?user_id=eq." + userID +
+		"&select=id,title,created_at,updated_at&order=updated_at.desc"
+	data, err := c.req("GET", path, nil, nil)
+	if err != nil {
+		return nil, err
+	}
+	out := []ChatSession{}
+	return out, json.Unmarshal(data, &out)
+}
+
+// GetChatSession loads one conversation, scoped to its owner. Filtering on
+// user_id (not just id) is the access check: another user's id returns no rows.
+func (c *Client) GetChatSession(id, userID string) (*ChatSession, error) {
+	path := "chat_sessions?id=eq." + id + "&user_id=eq." + userID + "&select=*"
+	data, err := c.req("GET", path, nil, nil)
+	if err != nil {
+		return nil, err
+	}
+	var rows []ChatSession
+	if err := json.Unmarshal(data, &rows); err != nil {
+		return nil, err
+	}
+	if len(rows) == 0 {
+		return nil, fmt.Errorf("chat session not found")
+	}
+	return &rows[0], nil
+}
+
+// SaveChatMessages overwrites the transcript (the whole JSONB blob) and, if
+// title is non-empty, updates the title too. The updated_at trigger bumps the
+// timestamp so the sidebar re-sorts.
+func (c *Client) SaveChatMessages(id string, messages []Message, title string) error {
+	updates := map[string]interface{}{"messages": messages}
+	if title != "" {
+		updates["title"] = title
+	}
+	_, err := c.req("PATCH", "chat_sessions?id=eq."+id, updates, nil)
+	return err
+}
+
+// DeleteChatSession removes a conversation, scoped to its owner.
+func (c *Client) DeleteChatSession(id, userID string) error {
+	_, err := c.req("DELETE", "chat_sessions?id=eq."+id+"&user_id=eq."+userID, nil, nil)
+	return err
+}

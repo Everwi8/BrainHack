@@ -5,7 +5,6 @@ import MapView from "../components/map/MapView";
 import CrisisTriagePanel from "../components/map/CrisisTriagePanel";
 import BrainyMascot from "../components/BrainyMascot";
 import { api } from "../lib/api";
-import { mockHospitals, mockShelters } from "../lib/mockData";
 
 // ─── Stat chip ────────────────────────────────────────────────────────────────
 // A small pill displayed in the stats bar at the top of the page.
@@ -65,10 +64,10 @@ export default function Map() {
   // Each of these useState calls creates a piece of React state.
   // React re-renders the component whenever you call the setter (e.g. setCrises).
   const [crisis,    setCrisis]    = useState([]);
-  // Shelters/hospitals are map-visual only (not part of triage) — still mock for
-  // now, so seed them as initial state rather than fetching.
-  const [shelters]  = useState(mockShelters);
-  const [hospitals] = useState(mockHospitals);
+  // Shelters/hospitals are map-visual only (not part of triage). They come from
+  // the backend's /api/shelters and /api/hospitals endpoints.
+  const [shelters,  setShelters]  = useState([]);
+  const [hospitals, setHospitals] = useState([]);
   const [loading,   setLoading]   = useState(true);
   const [userPos,   setUserPos]   = useState(null); // null until geolocation resolves
 
@@ -85,8 +84,7 @@ export default function Map() {
   const [triageLoading, setTriageLoading] = useState(false);
   const [triageError,   setTriageError]   = useState(null);
 
-  // loadCrises pulls the live crisis list from the backend. Shelters/hospitals
-  // stay on mock data for now — they're map-visual only, not part of triage.
+  // loadCrises pulls the live crisis list from the backend.
   const loadCrises = useCallback(async () => {
     // Note: no synchronous setLoading(true) here — `loading` starts true on
     // mount, and the toggle handler flips it before re-calling this.
@@ -101,8 +99,8 @@ export default function Map() {
     }
   }, []);
 
-  // On mount: resolve location, load crises, seed the mock layers, and read the
-  // current data-source mode so the toggle button shows the right state.
+  // On mount: resolve location, load crises, fetch the shelter/hospital layers,
+  // and read the current data-source mode so the toggle button shows the right state.
   useEffect(() => {
     navigator.geolocation.getCurrentPosition(
       (pos) => setUserPos([pos.coords.latitude, pos.coords.longitude]),
@@ -111,6 +109,12 @@ export default function Map() {
     // Deferred so the state updates land in an async callback, not synchronously
     // in the effect body (react-hooks/set-state-in-effect).
     Promise.resolve().then(loadCrises);
+    api.get("/api/shelters")
+      .then(d => setShelters(Array.isArray(d) ? d : []))
+      .catch(err => { console.error("load shelters:", err); setShelters([]); });
+    api.get("/api/hospitals")
+      .then(d => setHospitals(Array.isArray(d?.hospitals) ? d.hospitals : []))
+      .catch(err => { console.error("load hospitals:", err); setHospitals([]); });
     api.get("/api/admin/data-source").then(d => setMode(d.mode)).catch(() => {});
   }, [loadCrises]);
 
