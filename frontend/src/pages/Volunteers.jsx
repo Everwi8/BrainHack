@@ -17,15 +17,19 @@ function tabLabelFromTitle(title = "") {
   return title.length > 22 ? `${title.slice(0, 22)}...` : title;
 }
 
-function mapCrisisToTab(crisis) {
+// A tab is now one joined TASK (each task has its own group chat). The label is
+// the task title; the meta line carries the parent crisis context.
+function mapTaskToTab(task) {
   return {
-    id: crisis.id,
-    label: tabLabelFromTitle(crisis.title),
-    title: crisis.title,
+    id: task.id,
+    label: tabLabelFromTitle(task.title),
+    title: task.title,
+    crisisTitle: task.crisis_title || "",
     meta: [
-      toTitleCase(crisis.type),
-      toTitleCase(crisis.severity),
-      crisis.location_name || "",
+      task.crisis_title,
+      toTitleCase(task.crisis_type),
+      toTitleCase(task.crisis_severity),
+      task.crisis_location || "",
     ].filter(Boolean).join(" • "),
   };
 }
@@ -75,17 +79,40 @@ function getCurrentUserIDFromToken() {
   }
 }
 
+// getAuthToken / readJSONSafe are module-scope (pure) helpers so the data-loading
+// effects can reference them without a use-before-declare hazard.
+function getAuthToken() {
+  return (
+    localStorage.getItem("brainy_token") ||
+    localStorage.getItem("token") ||
+    localStorage.getItem("authToken") ||
+    localStorage.getItem("jwt_token") ||
+    localStorage.getItem("jwt") ||
+    ""
+  );
+}
+
+async function readJSONSafe(res) {
+  const raw = await res.text();
+  if (!raw.trim()) return { __empty: true };
+  try {
+    return JSON.parse(raw);
+  } catch {
+    return { __raw: raw };
+  }
+}
+
 export default function Volunteers() {
   const [activeGroup, setActiveGroup] = useState("");
-  const [crisisTabs, setCrisisTabs] = useState([]);
+  const [taskTabs, setTaskTabs] = useState([]);
   const [draft, setDraft] = useState("");
   const [messagesByGroup, setMessagesByGroup] = useState({});
   const [isSendingVoice, setIsSendingVoice] = useState(false);
   const [pendingVoiceClip, setPendingVoiceClip] = useState(null);
   const [pendingImage, setPendingImage] = useState(null);
   const [voiceStatus, setVoiceStatus] = useState("");
-  const [isLoadingCrises, setIsLoadingCrises] = useState(true);
-  const [crisesError, setCrisesError] = useState("");
+  const [isLoadingTasks, setIsLoadingTasks] = useState(true);
+  const [tasksError, setTasksError] = useState("");
   const [isLoadingMessages, setIsLoadingMessages] = useState(false);
   const [messagesError, setMessagesError] = useState("");
   const [cameraMenuOpen, setCameraMenuOpen] = useState(false);
@@ -97,11 +124,16 @@ export default function Volunteers() {
   const imageUrlsRef = useRef([]);
   const uploadInputRef = useRef(null);
   const currentUserID = useMemo(() => getCurrentUserIDFromToken(), []);
+  // Task to open on arrival, passed from the Crisis Detail join flow (?task_id=).
+  const preselectTaskId = useMemo(
+    () => new URLSearchParams(window.location.search).get("task_id") || "",
+    [],
+  );
 
   const group = useMemo(() => {
-    if (crisisTabs.length === 0) return null;
-    return crisisTabs.find((item) => item.id === activeGroup) ?? crisisTabs[0];
-  }, [activeGroup, crisisTabs]);
+    if (taskTabs.length === 0) return null;
+    return taskTabs.find((item) => item.id === activeGroup) ?? taskTabs[0];
+  }, [activeGroup, taskTabs]);
   const messages = messagesByGroup[activeGroup] ?? [];
   const canSend = Boolean(activeGroup) && Boolean(draft.trim() || pendingVoiceClip || pendingImage) && !isRecording && !isSendingVoice;
   const statusText = isRecording
@@ -126,28 +158,26 @@ export default function Volunteers() {
   useEffect(() => {
     let ignore = false;
 
-    const loadCrises = async () => {
-      if (!ignore) setIsLoadingCrises(true);
+    // Tabs are the tasks the user has JOINED (one per crisis for non-coordinators,
+    // many for coordinators). Joining happens on the Crisis Detail page; this page
+    // is just the per-task group chats they already have access to.
+    const loadMyTasks = async () => {
+      if (!ignore) setIsLoadingTasks(true);
       try {
-        const res = await fetch(`${API_BASE_URL}/api/crises`);
+        const token = getAuthToken();
+        const res = await fetch(`${API_BASE_URL}/api/tasks/mine`, {
+          headers: token ? { Authorization: `Bearer ${token}` } : {},
+        });
         const payload = await readJSONSafe(res);
         if (!res.ok) {
-          throw new Error(payload.error ?? payload.__raw ?? `Could not load crises: ${res.status}`);
+          throw new Error(payload.error ?? payload.__raw ?? `Could not load your tasks: ${res.status}`);
         }
 
         const rows = Array.isArray(payload) ? payload : [];
-        const tabs = rows
-          .filter((row) => row?.id && row?.title && row?.status === "active")
-          .map((row) => mapCrisisToTab({
-            id: row.id,
-            title: row.title,
-            type: row.type,
-            severity: row.severity,
-            location_name: row.location_name,
-          }));
+        const tabs = rows.filter((row) => row?.id && row?.title).map(mapTaskToTab);
 
         if (ignore) return;
-        setCrisisTabs(tabs);
+        setTaskTabs(tabs);
         setMessagesByGroup((prev) => {
           const next = {};
           tabs.forEach((tab) => {
@@ -157,28 +187,46 @@ export default function Volunteers() {
         });
         setActiveGroup((prev) => {
           if (tabs.length === 0) return "";
+          // Prefer the task passed in via ?task_id (just joined), then the
+          // currently-open tab, then the first one.
+          if (preselectTaskId && tabs.some((tab) => tab.id === preselectTaskId)) return preselectTaskId;
           if (prev && tabs.some((tab) => tab.id === prev)) return prev;
           return tabs[0].id;
         });
-        setCrisesError("");
+        setTasksError("");
       } catch (err) {
         if (!ignore) {
-          setCrisesError(err?.message || "Could not load crises.");
-          setCrisisTabs([]);
+          setTasksError(err?.message || "Could not load your tasks.");
+          setTaskTabs([]);
           setActiveGroup("");
         }
       } finally {
-        if (!ignore) setIsLoadingCrises(false);
+        if (!ignore) setIsLoadingTasks(false);
       }
     };
 
-    loadCrises();
-    const timer = setInterval(loadCrises, 30000);
+    loadMyTasks();
+    const timer = setInterval(loadMyTasks, 30000);
     return () => {
       ignore = true;
       clearInterval(timer);
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // Leave the active task → frees the per-crisis slot and drops its chat tab.
+  const leaveActiveTask = async () => {
+    if (!activeGroup) return;
+    const token = getAuthToken();
+    try {
+      await fetch(`${API_BASE_URL}/api/tasks/${activeGroup}/join`, {
+        method: "DELETE",
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+      });
+    } catch { /* ignore — refresh will reconcile */ }
+    setTaskTabs((prev) => prev.filter((t) => t.id !== activeGroup));
+    setActiveGroup("");
+  };
 
   const mapServerMessageToUI = (msg) => {
     const senderID = msg?.sender_user_id || "";
@@ -209,7 +257,10 @@ export default function Volunteers() {
       }
 
       try {
-        const res = await fetch(`${API_BASE_URL}/api/groupchat/${activeGroup}/messages`);
+        const token = getAuthToken();
+        const res = await fetch(`${API_BASE_URL}/api/taskchat/${activeGroup}/messages`, {
+          headers: token ? { Authorization: `Bearer ${token}` } : {},
+        });
         const payload = await readJSONSafe(res);
         if (!res.ok) {
           throw new Error(payload.error ?? payload.__raw ?? `Could not load group chat: ${res.status}`);
@@ -268,7 +319,7 @@ export default function Volunteers() {
 
   const startVoiceRecording = async () => {
     if (!activeGroup) {
-      setVoiceStatus("No active crisis group selected.");
+      setVoiceStatus("No task selected.");
       return;
     }
     clearPendingVoiceClip();
@@ -288,24 +339,6 @@ export default function Volunteers() {
       return;
     }
     startVoiceRecording();
-  };
-
-  const getAuthToken = () =>
-    localStorage.getItem("brainy_token") ||
-    localStorage.getItem("token") ||
-    localStorage.getItem("authToken") ||
-    localStorage.getItem("jwt_token") ||
-    localStorage.getItem("jwt") ||
-    "";
-
-  const readJSONSafe = async (res) => {
-    const raw = await res.text();
-    if (!raw.trim()) return { __empty: true };
-    try {
-      return JSON.parse(raw);
-    } catch {
-      return { __raw: raw };
-    }
   };
 
   const uploadVoice = async (voiceClip) => {
@@ -358,11 +391,11 @@ export default function Volunteers() {
     return body.image_url;
   };
 
-  const postGroupChatMessage = async (crisisID, payload) => {
+  const postGroupChatMessage = async (taskID, payload) => {
     const token = getAuthToken();
     if (!token) throw new Error("Please login first to send group chat messages.");
 
-    const res = await fetch(`${API_BASE_URL}/api/groupchat/${crisisID}/messages`, {
+    const res = await fetch(`${API_BASE_URL}/api/taskchat/${taskID}/messages`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -502,7 +535,7 @@ export default function Volunteers() {
         }}
       >
         <div style={{ display: "flex", gap: 12, marginBottom: 12, flexWrap: "wrap" }}>
-          {crisisTabs.map((item) => {
+          {taskTabs.map((item) => {
             const active = item.id === activeGroup;
             return (
               <button
@@ -543,21 +576,42 @@ export default function Volunteers() {
               borderBottom: "2px solid #1E1E1E",
               padding: "20px 50px 18px",
               background: "#E8E4D8",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "space-between",
+              gap: 16,
             }}
           >
-            <div style={{ fontWeight: 800, fontSize: 38 / 2, color: "#131313", lineHeight: 1.2 }}>
-              {group?.title || "No active crisis"}
+            <div style={{ minWidth: 0 }}>
+              <div style={{ fontWeight: 800, fontSize: 38 / 2, color: "#131313", lineHeight: 1.2 }}>
+                {group?.title || "No task selected"}
+              </div>
+              <div
+                style={{
+                  marginTop: 4,
+                  color: "#6F6E78",
+                  fontSize: 31 / 2,
+                  fontWeight: 700,
+                }}
+              >
+                {group?.meta || "Join a task from a crisis to start collaborating"}
+              </div>
             </div>
-            <div
-              style={{
-                marginTop: 4,
-                color: "#6F6E78",
-                fontSize: 31 / 2,
-                fontWeight: 700,
-              }}
-            >
-              {group?.meta || "No crisis metadata"}
-            </div>
+            {group && (
+              <button
+                onClick={leaveActiveTask}
+                title="Leave this task"
+                style={{
+                  flexShrink: 0,
+                  display: "inline-flex", alignItems: "center", gap: 6,
+                  border: "1.5px solid #B42318", background: "#fff", color: "#B42318",
+                  borderRadius: 999, padding: "8px 16px",
+                  fontFamily: "'Nunito', sans-serif", fontWeight: 800, fontSize: 13, cursor: "pointer",
+                }}
+              >
+                <X size={14} /> Leave task
+              </button>
+            )}
           </header>
 
           <div
@@ -573,11 +627,13 @@ export default function Volunteers() {
           >
             {messages.length === 0 && (
               <div style={{ color: "#6F6E78", fontSize: 14, fontWeight: 700, textAlign: "center", marginTop: 18 }}>
-                {isLoadingCrises
-                  ? "Loading crisis groups..."
-                  : isLoadingMessages
-                    ? "Loading group chat history..."
-                    : (messagesError || crisesError || "No messages yet for this crisis.")}
+                {isLoadingTasks
+                  ? "Loading your tasks..."
+                  : taskTabs.length === 0
+                    ? (tasksError || "You haven't joined any tasks yet. Join a task from a crisis to start collaborating.")
+                    : isLoadingMessages
+                      ? "Loading group chat history..."
+                      : (messagesError || "No messages yet for this task.")}
               </div>
             )}
 

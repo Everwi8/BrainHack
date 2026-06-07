@@ -2,7 +2,7 @@
 // filter; each card links through to the crisis it belongs to (/crises/:id).
 import { useState, useEffect } from "react";
 import { Link } from "react-router-dom";
-import { ListTodo, ArrowRight, Clock } from "lucide-react";
+import { ListTodo, ArrowRight, Clock, Users } from "lucide-react";
 import Navbar from "../components/layout/NavBar";
 import BrainyMascot from "../components/BrainyMascot";
 import { api } from "../lib/api";
@@ -27,6 +27,13 @@ const TASK_STATUS = {
   done:        { color: "#15803D", bg: "#DCFCE7", label: "Done"        },
 };
 const statusStyle = (s) => TASK_STATUS[s] ?? { color: "#6B7280", bg: "#F3F4F6", label: s || "—" };
+
+// Priority → colour + label (mirrors the AI task-card scheme on CrisisDetail).
+const TASK_PRIORITY = {
+  high:   { color: "#B91C1C", bg: "#FEE2E2", label: "High"   },
+  medium: { color: "#C2410C", bg: "#FFEDD5", label: "Medium" },
+  low:    { color: "#166534", bg: "#DCFCE7", label: "Low"    },
+};
 
 // Filter buckets group the raw statuses into the three the user cares about.
 const FILTERS = [
@@ -130,16 +137,25 @@ export default function Tasks() {
           <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
             {visible.map((t) => {
               const st = statusStyle(t.status);
+              const pr = TASK_PRIORITY[t.priority];
               return (
                 <div key={t.id} style={{
                   background: CARD, borderRadius: RADIUS, boxShadow: CARD_SH, padding: "16px 18px",
                 }}>
                   <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 12 }}>
                     <h3 style={{ color: INK, fontSize: 17, fontWeight: 800, margin: 0 }}>{t.title}</h3>
-                    <span style={{
-                      flexShrink: 0, color: st.color, background: st.bg,
-                      borderRadius: 999, padding: "3px 12px", fontSize: 12, fontWeight: 800,
-                    }}>{st.label}</span>
+                    <div style={{ display: "flex", gap: 6, flexShrink: 0 }}>
+                      {pr && (
+                        <span style={{
+                          color: pr.color, background: pr.bg,
+                          borderRadius: 999, padding: "3px 12px", fontSize: 12, fontWeight: 800,
+                        }}>{pr.label}</span>
+                      )}
+                      <span style={{
+                        color: st.color, background: st.bg,
+                        borderRadius: 999, padding: "3px 12px", fontSize: 12, fontWeight: 800,
+                      }}>{st.label}</span>
+                    </div>
                   </div>
 
                   {t.description && (
@@ -150,8 +166,15 @@ export default function Tasks() {
                     display: "flex", alignItems: "center", justifyContent: "space-between",
                     marginTop: 12, flexWrap: "wrap", gap: 8,
                   }}>
-                    <span style={{ display: "flex", alignItems: "center", gap: 5, color: "#999", fontSize: 13 }}>
-                      <Clock size={13} /> {timeAgo(t.created_at) || "—"}
+                    <span style={{ display: "flex", alignItems: "center", gap: 14, color: "#999", fontSize: 13, flexWrap: "wrap" }}>
+                      <span style={{ display: "flex", alignItems: "center", gap: 5 }}>
+                        <Clock size={13} /> {timeAgo(t.created_at) || "—"}
+                      </span>
+                      {t.volunteers_needed > 0 && (
+                        <span style={{ display: "flex", alignItems: "center", gap: 5, color: "#16A34A", fontWeight: 700 }}>
+                          <Users size={13} /> {t.volunteers_needed} needed
+                        </span>
+                      )}
                     </span>
                     {t.crisis_id && (
                       <Link to={`/crises/${t.crisis_id}`} style={{

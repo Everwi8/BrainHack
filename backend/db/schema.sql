@@ -66,6 +66,12 @@ CREATE TABLE IF NOT EXISTS tasks (
   status      TEXT        NOT NULL DEFAULT 'pending'
                 CONSTRAINT task_status_valid
                 CHECK (status IN ('pending','assigned','in_progress','resolved')),
+  -- priority + volunteers_needed mirror the AI task-card fields (taskgen.go) so
+  -- generated cards persist with stable IDs and the CrisisDetail UI can render them.
+  priority    TEXT        NOT NULL DEFAULT 'medium'
+                CONSTRAINT task_priority_valid
+                CHECK (priority IN ('low','medium','high')),
+  volunteers_needed INT   NOT NULL DEFAULT 1,
   assigned_to UUID        REFERENCES users(id),
   created_by  UUID        REFERENCES users(id),
   created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
@@ -74,6 +80,21 @@ CREATE TABLE IF NOT EXISTS tasks (
 
 CREATE INDEX IF NOT EXISTS idx_tasks_crisis_id ON tasks(crisis_id);
 CREATE INDEX IF NOT EXISTS idx_tasks_status    ON tasks(status);
+
+-- ─── Task membership ─────────────────────────────────────────────────────────
+-- One row per (task, user). Joining a task gates access to that task's group
+-- chat. Residents/volunteers may hold one task per crisis (enforced in
+-- handler/tasks.go); coordinators are unlimited.
+CREATE TABLE IF NOT EXISTS task_members (
+  id         UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
+  task_id    UUID        NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+  user_id    UUID        NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  UNIQUE (task_id, user_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_task_members_user ON task_members(user_id);
+CREATE INDEX IF NOT EXISTS idx_task_members_task ON task_members(task_id);
 
 -- ─── Volunteers ──────────────────────────────────────────────────────────────
 CREATE TABLE IF NOT EXISTS volunteers (

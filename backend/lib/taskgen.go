@@ -330,16 +330,9 @@ func GenerateTasksFromTriage() ([]TaskCard, error) {
 // crisis with no matching findings (e.g. it has gone quiet) yields an empty
 // report and no tasks, not an error.
 func TriageForCrisis(crisisID string) (TriageReport, []TaskCard, error) {
-	report, err := RunTriage()
+	scoped, err := TriageFindingsForCrisis(crisisID)
 	if err != nil {
 		return TriageReport{}, nil, err
-	}
-
-	scoped := TriageReport{GeneratedAt: report.GeneratedAt}
-	for _, f := range report.Findings {
-		if f.CrisisID == crisisID {
-			scoped.Findings = append(scoped.Findings, f)
-		}
 	}
 	if len(scoped.Findings) == 0 {
 		return scoped, nil, nil
@@ -350,6 +343,24 @@ func TriageForCrisis(crisisID string) (TriageReport, []TaskCard, error) {
 		return scoped, nil, err
 	}
 	return scoped, cards, nil
+}
+
+// TriageFindingsForCrisis returns just the findings scoped to one crisis (the
+// Situation assessment), skipping the slower LLM task-card generation. Used by
+// the crisis-triage handler when the crisis already has persisted task rows, so
+// reloading the page doesn't re-run task generation.
+func TriageFindingsForCrisis(crisisID string) (TriageReport, error) {
+	report, err := RunTriage()
+	if err != nil {
+		return TriageReport{}, err
+	}
+	scoped := TriageReport{GeneratedAt: report.GeneratedAt}
+	for _, f := range report.Findings {
+		if f.CrisisID == crisisID {
+			scoped.Findings = append(scoped.Findings, f)
+		}
+	}
+	return scoped, nil
 }
 
 // ForwardTasks writes generated cards into the shared tasks store via lib.DB so

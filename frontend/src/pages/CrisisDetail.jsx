@@ -3,18 +3,35 @@
 //
 // Sections: Header · Brainy's Brief · Live sensor cards · Area mini-map · Task panel · "I want to help"
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useParams, useNavigate, Link } from "react-router-dom";
 import { MapContainer, TileLayer, CircleMarker, Tooltip } from "react-leaflet";
 import {
   ArrowLeft, MapPin, Clock, Droplets, Waves, TrainFront, BedDouble,
   TrendingUp, TrendingDown, Minus, ShieldCheck, ExternalLink, Users, ListTodo,
-  MessageCircle, MessagesSquare, ChevronRight, AlertTriangle, Sparkles, Layers,
+  MessageCircle, MessagesSquare, ChevronRight, AlertTriangle, Sparkles, Layers, Check,
 } from "lucide-react";
 import Navbar from "../components/layout/NavBar";
 import BrainyMascot from "../components/BrainyMascot";
 import BrainyDrawer from "../components/crisis/BrainyDrawer";
 import { api } from "../lib/api";
+
+// Joining a task needs the raw response (the 409 body carries current_task_id for
+// the leave-and-switch flow), which the shared api helper discards — so we POST
+// directly here.
+const API_BASE = import.meta.env.VITE_API_URL ?? "http://localhost:8080";
+function joinAuthHeaders() {
+  const token = localStorage.getItem("brainy_token");
+  return token ? { Authorization: `Bearer ${token}` } : {};
+}
+async function postJoin(taskId) {
+  const res = await fetch(`${API_BASE}/api/tasks/${taskId}/join`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...joinAuthHeaders() },
+  });
+  const body = await res.json().catch(() => ({}));
+  return { ok: res.ok, status: res.status, body };
+}
 
 // Placeholder "nearby helpers" for the mini-map until James's live volunteer
 // locations (GET /api/volunteers) are wired up — that endpoint is still a stub.
@@ -129,31 +146,24 @@ function SensorCard({ icon, label, value, status, pct }) {
 }
 
 // ─── AI task card ────────────────────────────────────────────────────────────────
-// Renders one LLM-generated task card from the triage endpoint (title, priority,
-// description, volunteers_needed). Clicking it signs the user up to help on this
-// crisis via the volunteer page.
-function AiTaskCard({ task, onClick }) {
+// Renders one volunteer task (title, priority, description, volunteers_needed)
+// with a join/confirm gate. Clicking "Help with this" reveals an inline Confirm
+// button; only after confirming does the user join the task and gain access to
+// its group chat. A task already joined shows an "Open chat" affordance, and a
+// one-task-per-crisis conflict offers leave-and-switch.
+function AiTaskCard({
+  task, joined, confirming, joining, error,
+  onRequestConfirm, onCancel, onConfirm, onOpenChat, onLeaveAndJoin,
+}) {
   const p = PRIORITY[task.priority] ?? PRIORITY.medium;
+  const accent = joined ? "#16A34A" : "#EF4444";
   return (
     <div
-      onClick={onClick}
-      role="button"
-      tabIndex={0}
-      onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onClick(); } }}
       style={{
-        background: "#FBFAF7", border: "1px solid #ECE6DA", borderRadius: 12,
-        padding: "12px 14px", display: "flex", flexDirection: "column", gap: 5,
-        cursor: "pointer", transition: "border-color 150ms, box-shadow 150ms, background 150ms",
-      }}
-      onMouseEnter={(e) => {
-        e.currentTarget.style.borderColor = "#EF4444";
-        e.currentTarget.style.boxShadow = "0 2px 10px rgba(239,68,68,0.14)";
-        e.currentTarget.style.background = "#fff";
-      }}
-      onMouseLeave={(e) => {
-        e.currentTarget.style.borderColor = "#ECE6DA";
-        e.currentTarget.style.boxShadow = "none";
-        e.currentTarget.style.background = "#FBFAF7";
+        background: joined ? "#F0FDF4" : "#FBFAF7",
+        border: `1px solid ${joined ? "#BBF7D0" : "#ECE6DA"}`, borderRadius: 12,
+        padding: "12px 14px", display: "flex", flexDirection: "column", gap: 7,
+        transition: "border-color 150ms, box-shadow 150ms, background 150ms",
       }}
     >
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10 }}>
@@ -161,16 +171,69 @@ function AiTaskCard({ task, onClick }) {
         <Badge color={p.color} bg={p.bg}>{p.label}</Badge>
       </div>
       {task.description && <span style={{ fontSize: 12.5, color: "#6B6B6B" }}>{task.description}</span>}
+
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, marginTop: 2 }}>
         <span style={{ display: "inline-flex", alignItems: "center", gap: 4, fontSize: 11.5, fontWeight: 700, color: "#16A34A" }}>
           <Users size={12} /> {task.volunteers_needed} volunteer{task.volunteers_needed === 1 ? "" : "s"} needed
         </span>
-        <span style={{ display: "inline-flex", alignItems: "center", gap: 2, fontSize: 12, fontWeight: 800, color: "#EF4444" }}>
-          Help with this <ChevronRight size={13} />
-        </span>
+
+        {/* Right-side action — depends on state */}
+        {joined ? (
+          <button onClick={onOpenChat} style={ctaBtn("#16A34A")}>
+            <Check size={13} /> Joined · Open chat
+          </button>
+        ) : error ? null : confirming ? (
+          <span style={{ display: "inline-flex", gap: 8 }}>
+            <button onClick={onCancel} disabled={joining} style={ghostBtn()}>Cancel</button>
+            <button onClick={onConfirm} disabled={joining} style={ctaBtn("#EF4444")}>
+              {joining ? "Joining…" : "Confirm join"}
+            </button>
+          </span>
+        ) : (
+          <button onClick={onRequestConfirm} style={{
+            display: "inline-flex", alignItems: "center", gap: 2, fontSize: 12, fontWeight: 800,
+            color: accent, background: "none", border: "none", cursor: "pointer", padding: 0,
+          }}>
+            Help with this <ChevronRight size={13} />
+          </button>
+        )}
       </div>
+
+      {/* One-task-per-crisis conflict → offer leave-and-switch */}
+      {error && (
+        <div style={{
+          background: "#FEF2F2", border: "1px solid #FECACA", borderRadius: 10,
+          padding: "9px 11px", display: "flex", flexDirection: "column", gap: 8,
+        }}>
+          <span style={{ fontSize: 12, color: "#B91C1C", fontWeight: 600 }}>{error.message}</span>
+          <span style={{ display: "inline-flex", gap: 8 }}>
+            <button onClick={onCancel} disabled={joining} style={ghostBtn()}>Dismiss</button>
+            {error.currentTaskId && (
+              <button onClick={onLeaveAndJoin} disabled={joining} style={ctaBtn("#EF4444")}>
+                {joining ? "Switching…" : "Leave current & join"}
+              </button>
+            )}
+          </span>
+        </div>
+      )}
     </div>
   );
+}
+
+// Small shared button styles for the task-card actions.
+function ctaBtn(bg) {
+  return {
+    display: "inline-flex", alignItems: "center", gap: 5,
+    background: bg, color: "#fff", border: "none", borderRadius: 8,
+    padding: "6px 12px", fontSize: 12, fontWeight: 800, cursor: "pointer",
+    fontFamily: "inherit",
+  };
+}
+function ghostBtn() {
+  return {
+    background: "#fff", color: "#6B7280", border: "1px solid #E5E7EB", borderRadius: 8,
+    padding: "6px 12px", fontSize: 12, fontWeight: 700, cursor: "pointer", fontFamily: "inherit",
+  };
 }
 
 // ─── Sensor status logic (thresholds from JeraldSession.md) ───────────────────────
@@ -200,6 +263,79 @@ export default function CrisisDetail() {
   // renders the crisis immediately and streams the analysis in when ready.
   const [triage, setTriage] = useState(null);
   const [triageLoading, setTriageLoading] = useState(true);
+
+  // Task membership for the join/confirm flow. myTaskId is the task (in THIS
+  // crisis) the user has already joined — non-coordinators may hold only one.
+  const [myTaskId, setMyTaskId] = useState(null);
+  const [confirmingId, setConfirmingId] = useState(null); // card showing Confirm
+  const [joiningId, setJoiningId] = useState(null);       // in-flight join
+  const [joinError, setJoinError] = useState(null);       // { taskId, message, currentTaskId }
+
+  // Which task (if any) the user has joined in this crisis, so the matching card
+  // renders its "Joined · Open chat" state.
+  useEffect(() => {
+    if (!id) return;
+    let cancelled = false;
+    api.get("/api/tasks/mine")
+      .then((rows) => {
+        if (cancelled) return;
+        const mine = (Array.isArray(rows) ? rows : []).find((t) => t.crisis_id === id);
+        setMyTaskId(mine ? mine.id : null);
+      })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, [id]);
+
+  const tasksRef = useRef(null);
+  const openTaskChat = (taskId) => navigate(`/volunteers?task_id=${taskId}`);
+
+  // The big "I want to help" CTA: open the user's task chat if they've joined one
+  // here, otherwise scroll them to the task list to pick one (joining is gated to
+  // those cards).
+  const goHelp = () => {
+    if (myTaskId) { openTaskChat(myTaskId); return; }
+    tasksRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+  };
+
+  // Confirm → join the task, then open its group chat. A 409 means the user
+  // already holds another task in this crisis; surface leave-and-switch.
+  const confirmJoin = async (taskId) => {
+    setJoiningId(taskId);
+    setJoinError(null);
+    const { ok, status, body } = await postJoin(taskId);
+    setJoiningId(null);
+    if (ok) {
+      setMyTaskId(taskId);
+      setConfirmingId(null);
+      openTaskChat(taskId);
+      return;
+    }
+    if (status === 409) {
+      setConfirmingId(null);
+      setJoinError({
+        taskId,
+        message: body.error || "You already have a task in this crisis.",
+        currentTaskId: body.current_task_id || myTaskId,
+      });
+      return;
+    }
+    setJoinError({ taskId, message: body.error || "Could not join this task. Please try again." });
+  };
+
+  // Leave the current task in this crisis, then join the new one.
+  const leaveAndJoin = async (currentTaskId, taskId) => {
+    setJoiningId(taskId);
+    try { await api.delete(`/api/tasks/${currentTaskId}/join`); } catch { /* ignore */ }
+    const { ok, body } = await postJoin(taskId);
+    setJoiningId(null);
+    if (ok) {
+      setMyTaskId(taskId);
+      setJoinError(null);
+      openTaskChat(taskId);
+    } else {
+      setJoinError({ taskId, message: body.error || "Could not switch tasks." });
+    }
+  };
 
   // Fetch the crisis + its triage whenever the id in the URL changes. The two
   // run in parallel so the slow LLM call starts immediately.
@@ -429,6 +565,7 @@ export default function CrisisDetail() {
             </div>
 
             {/* ── 5. AI-generated volunteer tasks ── */}
+            <div ref={tasksRef} />
             <Panel>
               <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 14 }}>
                 <ListTodo size={16} color="#92400E" />
@@ -457,14 +594,24 @@ export default function CrisisDetail() {
                     No volunteer tasks suggested for this crisis right now.
                   </p>
                 ) : (
-                  aiTasks.map((t, i) => (
-                    <AiTaskCard
-                      key={i}
-                      task={t}
-                      // Each card routes to the volunteer signup with this crisis pre-selected.
-                      onClick={() => navigate(`/volunteers?crisis_id=${crisis.id}`)}
-                    />
-                  ))
+                  aiTasks.map((t, i) => {
+                    const taskId = t.id;
+                    return (
+                      <AiTaskCard
+                        key={taskId ?? i}
+                        task={t}
+                        joined={!!taskId && myTaskId === taskId}
+                        confirming={confirmingId === taskId}
+                        joining={joiningId === taskId}
+                        error={joinError?.taskId === taskId ? joinError : null}
+                        onRequestConfirm={() => { setJoinError(null); setConfirmingId(taskId); }}
+                        onCancel={() => { setConfirmingId(null); setJoinError(null); }}
+                        onConfirm={() => confirmJoin(taskId)}
+                        onOpenChat={() => openTaskChat(taskId)}
+                        onLeaveAndJoin={() => leaveAndJoin(joinError.currentTaskId, taskId)}
+                      />
+                    );
+                  })
                 )}
               </div>
             </Panel>
@@ -539,9 +686,9 @@ export default function CrisisDetail() {
               </div>
             </Panel>
 
-            {/* ── 6. I want to help ── */}
+            {/* ── 6. I want to help — opens your task chat, or jumps to the task list ── */}
             <button
-              onClick={() => navigate(`/volunteers?crisis_id=${crisis.id}`)}
+              onClick={goHelp}
               style={{
                 cursor: "pointer", border: "none", borderRadius: 14,
                 background: "#EF4444", color: "#fff",
@@ -553,7 +700,7 @@ export default function CrisisDetail() {
               onMouseEnter={(e) => (e.currentTarget.style.background = "#DC2626")}
               onMouseLeave={(e) => (e.currentTarget.style.background = "#EF4444")}
             >
-              I WANT TO HELP
+              {myTaskId ? "OPEN MY TASK CHAT" : "I WANT TO HELP"}
             </button>
 
             {/* Secondary actions: Talk to Brainy (opens drawer) + Group Chat (James's page) */}
@@ -573,7 +720,7 @@ export default function CrisisDetail() {
                 <MessageCircle size={16} /> Talk to Brainy
               </button>
               <button
-                onClick={() => navigate(`/volunteers?crisis_id=${crisis.id}`)}
+                onClick={goHelp}
                 style={{
                   flex: 1, cursor: "pointer", borderRadius: 12,
                   border: "2px solid #2563EB", background: "#fff", color: "#2563EB",

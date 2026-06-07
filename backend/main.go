@@ -80,9 +80,14 @@ func main() {
 
 		// Tasks — reads are public, writes require auth
 		api.GET("/tasks", handler.ListTasks)
+		api.GET("/tasks/mine", middleware.RequireAuth(), handler.ListMyTasks) // tasks the caller has joined
 		api.POST("/tasks", middleware.RequireAuth(), handler.CreateTask)
 		api.PATCH("/tasks/:id", middleware.RequireAuth(), handler.UpdateTask)
 		api.DELETE("/tasks/:id", middleware.RequireAuth(), handler.DeleteTask)
+		// Task membership: joining gates access to the task's group chat. One task
+		// per crisis for residents/volunteers; coordinators unlimited (handler logic).
+		api.POST("/tasks/:id/join", middleware.RequireAuth(), handler.JoinTask)
+		api.DELETE("/tasks/:id/join", middleware.RequireAuth(), handler.LeaveTask)
 
 		// Perrin — AI chat + triage. Chat requires auth so each user's
 		// conversation history is keyed to their account and isolated from others.
@@ -116,6 +121,9 @@ func main() {
 		api.GET("/groupchat/:crisisID/messages", handler.GetGroupChatMessages)
 		api.POST("/groupchat/:crisisID/messages", middleware.RequireAuth(), handler.PostGroupChatMessage)
 		api.POST("/groupchat/image", middleware.RequireAuth(), handler.UploadGroupChatImage)
+		// Per-task group chats — membership-gated (join a task to read/post).
+		api.GET("/taskchat/:taskID/messages", middleware.RequireAuth(), handler.GetTaskChatMessages)
+		api.POST("/taskchat/:taskID/messages", middleware.RequireAuth(), handler.PostTaskChatMessage)
 
 		// Admin — runtime demo/live data toggle (open for demo simplicity)
 		api.GET("/admin/data-source", handler.DataSourceStatus)

@@ -46,15 +46,17 @@ type CrisisWithTasks struct {
 }
 
 type Task struct {
-	ID          string    `json:"id,omitempty"`
-	CrisisID    string    `json:"crisis_id"`
-	Title       string    `json:"title"`
-	Description string    `json:"description"`
-	Status      string    `json:"status,omitempty"`
-	AssignedTo  *string   `json:"assigned_to"`
-	CreatedBy   *string   `json:"created_by"`
-	CreatedAt   time.Time `json:"created_at,omitempty"`
-	UpdatedAt   time.Time `json:"updated_at,omitempty"`
+	ID               string    `json:"id,omitempty"`
+	CrisisID         string    `json:"crisis_id"`
+	Title            string    `json:"title"`
+	Description      string    `json:"description"`
+	Status           string    `json:"status,omitempty"`
+	Priority         string    `json:"priority,omitempty"`
+	VolunteersNeeded int       `json:"volunteers_needed,omitempty"`
+	AssignedTo       *string   `json:"assigned_to"`
+	CreatedBy        *string   `json:"created_by"`
+	CreatedAt        time.Time `json:"created_at,omitempty"`
+	UpdatedAt        time.Time `json:"updated_at,omitempty"`
 }
 
 type User struct {
@@ -365,6 +367,104 @@ func (c *Client) DeleteTask(id string) error {
 	return err
 }
 
+// ─── Task membership ─────────────────────────────────────────────────────────
+// Joining a task gates access to that task's group chat. The per-crisis cap for
+// non-coordinators is enforced in handler/tasks.go (JoinTask) — these helpers are
+// the raw storage operations.
+
+type TaskMember struct {
+	ID        string    `json:"id,omitempty"`
+	TaskID    string    `json:"task_id"`
+	UserID    string    `json:"user_id"`
+	CreatedAt time.Time `json:"created_at,omitempty"`
+}
+
+// IsTaskMember reports whether userID has joined taskID.
+func (c *Client) IsTaskMember(taskID, userID string) (bool, error) {
+	path := "task_members?task_id=eq." + taskID + "&user_id=eq." + userID + "&select=id&limit=1"
+	data, err := c.req("GET", path, nil, nil)
+	if err != nil {
+		return false, err
+	}
+	var rows []TaskMember
+	if err := json.Unmarshal(data, &rows); err != nil {
+		return false, err
+	}
+	return len(rows) > 0, nil
+}
+
+// JoinTask records membership (idempotent at the storage level via the
+// UNIQUE(task_id,user_id) constraint).
+func (c *Client) JoinTask(taskID, userID string) error {
+	_, err := c.req("POST", "task_members", TaskMember{TaskID: taskID, UserID: userID}, nil)
+	return err
+}
+
+// LeaveTask removes membership; a no-op if the row doesn't exist.
+func (c *Client) LeaveTask(taskID, userID string) error {
+	_, err := c.req("DELETE", "task_members?task_id=eq."+taskID+"&user_id=eq."+userID, nil, nil)
+	return err
+}
+
+// CountTaskMembers returns how many users have joined taskID.
+func (c *Client) CountTaskMembers(taskID string) (int, error) {
+	data, err := c.req("GET", "task_members?task_id=eq."+taskID+"&select=id", nil, nil)
+	if err != nil {
+		return 0, err
+	}
+	var rows []TaskMember
+	if err := json.Unmarshal(data, &rows); err != nil {
+		return 0, err
+	}
+	return len(rows), nil
+}
+
+// MemberTaskInCrisis returns the id of the task (in crisisID) that userID has
+// already joined, or "" if none. Backs the one-task-per-crisis cap and the
+// frontend's leave-and-switch flow. Uses an inner-join embed so the crisis
+// filter applies to the joined tasks row.
+func (c *Client) MemberTaskInCrisis(userID, crisisID string) (string, error) {
+	path := "task_members?user_id=eq." + userID +
+		"&select=task_id,tasks!inner(id,crisis_id)&tasks.crisis_id=eq." + crisisID + "&limit=1"
+	data, err := c.req("GET", path, nil, nil)
+	if err != nil {
+		return "", err
+	}
+	var rows []struct {
+		TaskID string `json:"task_id"`
+	}
+	if err := json.Unmarshal(data, &rows); err != nil {
+		return "", err
+	}
+	if len(rows) == 0 {
+		return "", nil
+	}
+	return rows[0].TaskID, nil
+}
+
+// ListMemberTasks returns the full task rows userID has joined, newest first.
+// Drives the per-task tabs on the Volunteer page.
+func (c *Client) ListMemberTasks(userID string) ([]Task, error) {
+	path := "task_members?user_id=eq." + userID + "&select=tasks(*)&order=created_at.desc"
+	data, err := c.req("GET", path, nil, nil)
+	if err != nil {
+		return nil, err
+	}
+	var rows []struct {
+		Task *Task `json:"tasks"`
+	}
+	if err := json.Unmarshal(data, &rows); err != nil {
+		return nil, err
+	}
+	out := make([]Task, 0, len(rows))
+	for _, r := range rows {
+		if r.Task != nil {
+			out = append(out, *r.Task)
+		}
+	}
+	return out, nil
+}
+
 // ─── Users ───────────────────────────────────────────────────────────────────
 
 func (c *Client) GetUserByEmail(email string) (*User, error) {
@@ -409,15 +509,26 @@ func (c *Client) GetUserByID(id string) (*User, error) {
 	return &rows[0], nil
 }
 
+// Group chats are stored as chat_sessions rows whose title encodes the thread
+// key: "group:<crisisID>" for per-crisis threads, "taskgroup:<taskID>" for the
+// per-task threads introduced with task membership. The message array lives in
+// the JSONB `messages` column.
 const groupChatTitlePrefix = "group:"
+const taskChatTitlePrefix = "taskgroup:"
 
 func groupChatTitle(crisisID string) string {
 	return groupChatTitlePrefix + crisisID
 }
 
-func (c *Client) GetGroupChatSessionByCrisisID(crisisID string) (*GroupChatSession, error) {
-	title := url.QueryEscape(groupChatTitle(crisisID))
-	path := "chat_sessions?title=eq." + title + "&select=*&order=created_at.asc&limit=1"
+func taskChatTitle(taskID string) string {
+	return taskChatTitlePrefix + taskID
+}
+
+// getGroupChatSessionByTitle is the shared lookup behind both the crisis- and
+// task-keyed threads.
+func (c *Client) getGroupChatSessionByTitle(title string) (*GroupChatSession, error) {
+	q := url.QueryEscape(title)
+	path := "chat_sessions?title=eq." + q + "&select=*&order=created_at.asc&limit=1"
 	data, err := c.req("GET", path, nil, nil)
 	if err != nil {
 		return nil, err
@@ -432,10 +543,11 @@ func (c *Client) GetGroupChatSessionByCrisisID(crisisID string) (*GroupChatSessi
 	return &rows[0], nil
 }
 
-func (c *Client) CreateGroupChatSession(crisisID, ownerUserID string) (*GroupChatSession, error) {
+// createGroupChatSession inserts a fresh empty thread under the given title.
+func (c *Client) createGroupChatSession(title, ownerUserID string) (*GroupChatSession, error) {
 	body := map[string]interface{}{
 		"user_id":  ownerUserID,
-		"title":    groupChatTitle(crisisID),
+		"title":    title,
 		"messages": []GroupChatMessage{},
 	}
 	data, err := c.req("POST", "chat_sessions", body, nil)
@@ -449,6 +561,10 @@ func (c *Client) CreateGroupChatSession(crisisID, ownerUserID string) (*GroupCha
 	return &rows[0], nil
 }
 
+func (c *Client) GetGroupChatSessionByCrisisID(crisisID string) (*GroupChatSession, error) {
+	return c.getGroupChatSessionByTitle(groupChatTitle(crisisID))
+}
+
 func (c *Client) GetOrCreateGroupChatSession(crisisID, ownerUserID string) (*GroupChatSession, error) {
 	session, err := c.GetGroupChatSessionByCrisisID(crisisID)
 	if err != nil {
@@ -457,7 +573,24 @@ func (c *Client) GetOrCreateGroupChatSession(crisisID, ownerUserID string) (*Gro
 	if session != nil {
 		return session, nil
 	}
-	return c.CreateGroupChatSession(crisisID, ownerUserID)
+	return c.createGroupChatSession(groupChatTitle(crisisID), ownerUserID)
+}
+
+// GetGroupChatSessionByTaskID returns the per-task thread, or nil if none yet.
+func (c *Client) GetGroupChatSessionByTaskID(taskID string) (*GroupChatSession, error) {
+	return c.getGroupChatSessionByTitle(taskChatTitle(taskID))
+}
+
+// GetOrCreateTaskChatSession opens (or lazily creates) the per-task thread.
+func (c *Client) GetOrCreateTaskChatSession(taskID, ownerUserID string) (*GroupChatSession, error) {
+	session, err := c.GetGroupChatSessionByTaskID(taskID)
+	if err != nil {
+		return nil, err
+	}
+	if session != nil {
+		return session, nil
+	}
+	return c.createGroupChatSession(taskChatTitle(taskID), ownerUserID)
 }
 
 func (c *Client) SaveGroupChatMessages(sessionID string, messages []GroupChatMessage) error {
