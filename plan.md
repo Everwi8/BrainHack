@@ -1,7 +1,7 @@
 # BrainySG — MVP Project Plan
 
 **Team:** came4food · DSTA BrainHack 2026 · Fast Response Track
-**Stack:** React + Vite + TailwindCSS (frontend) · Go + Gin (backend) · PostgreSQL · gpt-oss-120b (OpenAI-compatible LLM API)
+**Stack:** React + Vite + TailwindCSS (frontend) · Go + Gin (backend) · Supabase (PostgreSQL) · OpenAI gpt-4.1-mini (text + vision) · Whisper (STT)
 
 ---
 
@@ -20,7 +20,7 @@ BrainySG is a Progressive Web App (PWA) that acts as Singapore's AI crisis-respo
 The platform does four things:
 
 1. **Unified Data Layer** — Pulls real-time data from NEA (weather, haze, dengue), LTA (transport disruptions), PUB (flood sensors), MOH (hospital beds), and OneMap into one system.
-2. **AI Triage** — Uses an LLM (Nemotron via OpenRouter) to detect threshold breaches, predict cascading events (e.g. heavy rain → flood → MRT disruption), and auto-generate actionable task cards.
+2. **AI Triage** — Uses an LLM (OpenAI gpt-4.1-mini) to detect threshold breaches, predict cascading events (e.g. heavy rain → flood → MRT disruption), and auto-generate actionable task cards.
 3. **Live Crisis Map** — OneMap-based map showing active crises as red dots, shelters with capacity, and hospitals with bed availability.
 4. **Volunteer Coordination** — AI matches volunteers to tasks by skill, distance, and availability. Volunteers join crisis-specific group chats with real-time updates from Brainy and coordinators.
 
@@ -35,10 +35,10 @@ The platform does four things:
 - **Frontend:** React 18+ with Vite, TailwindCSS, React Router, PWA (service worker + manifest)
 - **Backend:** Go with Gin framework, organized under `backend/` with `handler/`, `middleware/`, `lib/`, `ingestion/`, `cache/`
 - **Database:** Supabase (PostgreSQL via PostgREST) — `lib/supabase.go`
-- **AI:** `nvidia/nemotron-3-super-120b-a12b:free` (text) + `nvidia/nemotron-nano-12b-v2-vl:free` (vision) via OpenRouter for chatbot, triage, photo interpretation, and task generation
+- **AI:** OpenAI `gpt-4.1-mini` — a single multimodal model handles chatbot, triage, photo interpretation, and task generation (text + vision); `LLM_BASE_URL=https://api.openai.com/v1`
 - **Maps:** OneMap API (Singapore's national basemap, Leaflet)
 - **Real-time:** gorilla/websocket (planned for volunteer group chat)
-- **Speech-to-text:** Google STT or Whisper API (planned)
+- **Speech-to-text:** OpenAI Whisper (`whisper-1`) — live via `POST /api/voice` (`lib.TranscribeAudio`)
 - **Data Sources:** NEA, LTA DataMall, PUB MyWaters, MOH, data.gov.sg (all free/open APIs)
 - **Notifications:** Notify SG (stub for MVP)
 
@@ -67,7 +67,7 @@ The platform does four things:
 - Frontend dev server runs on Vite, proxies API calls to Go backend
 - All government data is polled by the backend at 5-minute intervals and cached (`cache/cache.go` with stale-on-error fallback)
 - If a government API fails, backend serves last-known-good cached data (graceful degradation)
-- Triage logic is rule-based cascade chains (not ML) — hardcoded relationships fed into Nemotron prompts as context
+- Triage logic is rule-based cascade chains (not ML) — hardcoded relationships fed into the LLM (gpt-4.1-mini) prompts as context
 - Hospital bed data is annual/static from MOH — displayed as "last reported" or simulated for demo
 - Auth is JWT for MVP (no Singpass integration yet)
 - PWA installable on any device — no app store required
@@ -80,13 +80,23 @@ The platform does four things:
 
 | Endpoint | Method | Owner | Consumer |
 |---|---|---|---|
-| `/api/crises` | GET | Sanjey | Aiya, Jerald |
+| `/api/crises` | GET | Sanjey | Aiya, Jerald | *(only approved crises returned)* |
+| `/api/crises` | POST | Sanjey | all | *(file a citizen report — auth required; coordinator's auto-approved, others pending)* |
 | `/api/crises/:id` | GET | Sanjey | Jerald, Perrin |
+| `/api/crises/:id/triage` | GET | Perrin | Jerald | *(live — per-crisis findings + task cards, backs map-click flow)* |
+| `/api/crises/mine` | GET | Sanjey | residents/volunteers | *(caller's own reports, any status — feed "pending" container)* |
+| `/api/crises/:id` | PATCH | Sanjey | reporter/coordinator | *(edit a report; owner only while pending, coordinator any)* |
+| `/api/crises/pending` | GET | Sanjey | coordinators | *(review queue — coordinator-only)* |
+| `/api/crises/:id/approve` | POST | Sanjey | coordinators | *(coordinator-only; publishes report to feed/map)* |
+| `/api/crises/:id/reject` | POST | Sanjey | coordinators | *(coordinator-only)* |
+| `/api/crises/:id/resolve` | POST | Sanjey | coordinators | *(coordinator-only; status→resolved, leaves map, sinks to feed end)* |
 | `/api/crises/nearby?lat=&lng=` | GET | Jerald | Aiya, Jerald |
 | `/api/tasks` | GET/POST | Sanjey | Jerald, James |
-| `/api/tasks/:id` | PATCH | Sanjey | James |
+| `/api/tasks/:id` | PATCH/DELETE | Sanjey | James |
 | `/api/chat` | POST | Perrin | Perrin |
 | `/api/chat/photo` | POST | Perrin | Perrin |
+| `/api/chat/sessions` | GET/POST | Perrin | Perrin | *(live — per-user chat session list / create)* |
+| `/api/chat/sessions/:id` | GET/DELETE | Perrin | Perrin | *(live — load / delete a stored session)* |
 | `/api/triage` | GET | Perrin | Perrin, Jerald |
 | `/api/triage/tasks` | GET | Perrin | Perrin, James |
 | `/api/volunteers` | GET/POST | James | James, Jerald |
@@ -94,7 +104,8 @@ The platform does four things:
 | `/api/groupchat/:crisisId` | GET/POST | James | James |
 | `/api/shelters?lat=&lng=` | GET | Jerald | Jerald, Perrin |
 | `/api/hospitals` | GET | Sanjey | Jerald |
-| `/api/transcribe` | POST | James | James |
+| `/api/voice` | POST | James | James | *(live — Whisper STT; was `/api/transcribe` in original contract)* |
+| `/api/admin/data-source` | GET/POST | Perrin | demo control | *(switch triage between live and demo data at runtime)* |
 | `/api/auth/login` | POST | Sanjey | All |
 | `/api/data/weather` | GET | Sanjey | Perrin |
 | `/api/data/floods` | GET | Sanjey | Perrin, Jerald |
@@ -102,6 +113,7 @@ The platform does four things:
 | `/api/data/dengue` | GET | Sanjey | Perrin |
 | `/api/data/transport` | GET | Sanjey | Perrin |
 | `/api/feed` | GET | Sanjey | Aiya |
+| `/api/geocode/reverse?lat=&lng=` | GET | Perrin | ReportCrisis | *(lat/lng → readable address via Nominatim, cached)* |
 
 ---
 
@@ -142,7 +154,7 @@ The platform does four things:
   - [x] Center feed: crisis event cards with tag badges (URGENT ALERT / LIVE / TRENDING / COMMUNITY), timestamp, title, location, body, comment/share counts, action button
   - [x] Right panel: "What's happening" trending box with 3 trending items + "Show more"
   - [x] Right panel: Emergency Help dark card (Police 999, Ambulance/SCDF 995, Haze Hotline)
-  - [ ] Replace hardcoded `MOCK_FEED` in `Timeline.jsx` with live data from `GET /api/feed` (backend endpoint is live — just needs frontend wiring)
+  - [x] `Timeline.jsx` now reads live data from `GET /api/feed` (relative timestamps, severity→tag styling, "View Detail" → `/crises/:id`); `MOCK_FEED` kept only as an on-error fallback. Feed shows the same approved crises the map renders.
 
 ### Backend
 
@@ -252,14 +264,13 @@ The platform does four things:
 ### Backend
 
 - [x] **LLM API Integration**
-  - [x] API client wrapper at `backend/lib/llm.go` (OpenAI-compatible; text model: `nvidia/nemotron-3-super-120b-a12b:free` via OpenRouter)
+  - [x] API client wrapper at `backend/lib/llm.go` (OpenAI chat-completions; model `gpt-4.1-mini` via `LLM_MODEL`/`LLM_BASE_URL`, defaults baked in)
   - [x] System prompt design for crisis chatbot persona (Brainy)
-  - [x] Conversation context management (in-memory history per session via `sessionStore sync.Map`, capped at 20 turns)
+  - [x] Conversation context management — now **persisted per-user in Supabase** (`chat_sessions` JSONB), auth-gated; LLM layer is stateless
   - [x] `POST /api/chat` handler wired up (`backend/handler/chat.go`)
   - [x] Error handling for API failures
   - [x] Structured JSON output parsing for task cards (`ChatJSON` helper in `llm.go`)
   - [x] Retry logic for transient API failures (3 attempts, exponential backoff on 429/5xx/network)
-  - [x] Reasoning disabled for JSON calls; enabled for prose answers (`reasoningParam` per-call)
 - [x] **Triage Logic** (`backend/lib/triage.go`, `triage_live.go`, `datasource.go`, `geo.go`)
   - [x] Threshold rules: water level ≥ 2.5 m → flood warning (≥ 3.5 m critical) — **now keys on real PUB metres** (data.gov.sg reports absolute metres, not capacity %; the old 75/90 % thresholds were dropped, matching ingestion's high-water mark)
   - [x] Threshold rules: PSI ≥ 100 → haze advisory (≥ 200 critical) — real per-region PSI from the live feed
@@ -278,15 +289,20 @@ The platform does four things:
   - [x] `GET /api/triage/tasks` endpoint exposes the generated cards
 - [x] **Photo Interpretation** (`backend/handler/photo.go`, `backend/lib/llm.go`, `backend/lib/photo_triage.go`)
   - [x] Accept image upload via `POST /api/chat/photo` (multipart, 8 MB cap, content-type sniffed from bytes)
-  - [x] `VisionLLM` sends image to `nvidia/nemotron-nano-12b-v2-vl:free`; returns `(reply string, obs *PhotoObservation, err error)`; `obs` is nil on prose-fallback path
-  - [x] Hybrid pipeline: VL model extracts structured `PhotoObservation` → 120B text model writes Brainy's reply using the facts; degrades to single-call prose if JSON parse fails
+  - [x] `VisionTurn` sends image to `gpt-4.1-mini` (multimodal — same model as text path); returns `(reply string, obs *PhotoObservation, err error)`; `obs` is nil on prose-fallback path
+  - [x] Hybrid pipeline: vision call extracts structured `PhotoObservation` → text call writes Brainy's reply using the facts; degrades to single-call prose if JSON parse fails
+  - [x] Photo persisted to Supabase Storage (`UploadChatImage`, best-effort) so it survives reloads; `image_url` returned in the response
   - [x] Photo trace added to session history so text follow-ups keep photo context
   - [x] `ObservationToFinding` (`lib/photo_triage.go`) maps a `PhotoObservation` to a `TriageFinding`; skips low/none severity and none/other crisis types
   - [x] `POST /api/chat/photo` response includes `crisis_card` when observation is actionable (no extra LLM call)
 - [x] **Chat Endpoints**
-  - [x] `POST /api/chat` — send text message, return AI response (fully implemented)
-  - [x] `POST /api/chat/photo` — send image, return AI analysis + optional `crisis_card`
-- [x] Chat history storage — in-memory per session (`sessionStore sync.Map`, capped at 20 turns); DB persistence not needed for demo
+  - [x] `POST /api/chat` — send text message, return AI response (fully implemented, auth-required)
+  - [x] `POST /api/chat/photo` — send image, return AI analysis + optional `crisis_card` + `image_url`
+  - [x] `GET/POST /api/chat/sessions` — list / create a user's chat sessions (`handler/chat.go`)
+  - [x] `GET/DELETE /api/chat/sessions/:id` — load / delete a stored session
+- [x] Chat history storage — **persisted per-user in Supabase** `chat_sessions` (JSONB messages); sidebar UI lists past sessions and starts new chats. Run migration `db/migrations/002_chat_sessions.sql` by hand or `/api/chat` 500s.
+- [x] **Per-crisis triage endpoint** — `GET /api/crises/:id/triage` (`handler/triage.go` `CrisisTriage` → `lib.TriageForCrisis`) returns `{crisis_id, generated_at, findings, tasks}` scoped to one crisis; backs the map-click → crisis-detail flow. Empty (not an error) when nothing links to the crisis.
+- [x] **Demo data provider** — `lib/triage_demo.go` `DemoDataProvider` serves a fixed cross-agency scenario tuned to the seeded crises (`db/seeds/`), so `DATA_SOURCE=demo` fires a believable repeatable triage even when SG is calm. Toggle live↔demo at runtime via `GET/POST /api/admin/data-source` (`handler/admin.go`).
 
 ### Live Data Gaps (triage now runs on live feeds only — these fields can't be sourced and are flagged here per the "no mock data" decision)
 
@@ -347,7 +363,7 @@ The platform does four things:
 
 ### Mock Data Needed
 
-- [x] 5-10 crisis markers — 5 mock crises in `src/lib/mockData.js`; real crises populated in Supabase via ingestion goroutines
+- [x] 5-10 crisis markers — frontend `src/lib/mockData.js` **deleted**; crises now come live from Supabase (ingestion goroutines) + `db/seeds/demo_crises.sql` for demos
 - [x] 10 shelter locations with coordinates and capacity (hardcoded in `handler/map.go`)
 - [x] 10 public hospital locations with bed counts — `handler/hospitals.go` (2025 MOH data)
 
@@ -382,11 +398,11 @@ The platform does four things:
 
 ### Backend
 
-- [ ] **Speech-to-Text**
-  - [ ] `POST /api/voice` route registered in `main.go` (auth-required) but handler `Voice` is a no-op stub — actual route is `/api/voice`, not `/api/transcribe` from the contract table
-  - [ ] Integration with Google STT or Whisper API
-  - [ ] Return transcribed text
-  - [ ] Forward transcribed text to Perrin's `POST /api/chat` as standard message
+- [x] **Speech-to-Text**
+  - [x] `POST /api/voice` route registered in `main.go` (**auth-required** via `middleware.RequireAuth()`); actual route is `/api/voice`, not `/api/transcribe` from the contract table
+  - [x] Integration with OpenAI Whisper (`whisper-1`) — `handler/volunteers.go` `Voice` → `lib.TranscribeAudio` (`STT_BASE_URL`/`STT_MODEL`)
+  - [x] Return transcribed text
+  - [ ] Forward transcribed text to Perrin's `POST /api/chat` as standard message (frontend wiring)
 - [x] **Volunteer System** (routes registered; handlers are no-ops)
   - [x] `POST /api/volunteers` — route registered, **auth-required** (`handler/volunteers.go` `RegisterVolunteer` stub)
   - [x] `GET /api/volunteers?crisis_id=` — route registered (`ListVolunteers` stub, public)
@@ -440,15 +456,19 @@ The platform does four things:
 | MOH | data.gov.sg | Hospital bed counts, BOR | Annual | Yes |
 | OneMap | onemap.gov.sg | Basemap, geocoding, routing | Live | Yes |
 | Notify SG | GovTech | Push notifications to citizens | Live | Yes |
-| OpenRouter | openrouter.ai | Nemotron 120B (text) + Nemotron 12B VL (vision) | Per request | Free tier |
+| OpenAI | api.openai.com | gpt-4.1-mini (text + vision) + whisper-1 (STT) | Per request | Paid |
 
 ---
 
 ## Notes
 
 - Hospital bed data is **annual/static**, not live. Displayed as "last reported" values from `handler/hospitals.go` (2025 MOH figures for 10 public hospitals).
-- All frontend work can proceed with mock data before API endpoints are fully wired; `src/lib/mockData.js` provides seed data for the map, crisis detail, and timeline pages.
-- **LLM setup:** text model is `nvidia/nemotron-3-super-120b-a12b:free`, vision model is `nvidia/nemotron-nano-12b-v2-vl:free`, both via OpenRouter (`LLM_BASE_URL=https://openrouter.ai/api/v1`). Gemini Flash is no longer used. See `plan-perrin.md` for model rationale and the two-quota-bucket strategy.
+- `src/lib/mockData.js` has been **removed** — the map, crisis detail, and home pages now read live data from the backend (crises/shelters/hospitals endpoints). Use `db/seeds/demo_crises.sql` + `DATA_SOURCE=demo` for a stable demo dataset.
+- **LLM setup:** a single OpenAI model, `gpt-4.1-mini`, handles both text and vision (`LLM_BASE_URL=https://api.openai.com/v1`, `LLM_MODEL=gpt-4.1-mini`). STT is `whisper-1` (`STT_BASE_URL`/`STT_MODEL`). This replaced the earlier Nemotron-via-OpenRouter setup (which itself replaced Gemini Flash) — gpt-4.1-mini is not a reasoning model, so the old per-call reasoning toggle is gone.
 - **Dengue:** `GET /api/data/dengue` is now fully live — it fetches from data.gov.sg on demand (poll-download → GeoJSON → cluster centroids, cached), so no ingestion goroutine is required. Note: this live data is **not** written into the `crises` table, so dengue does not yet surface in the crisis map/feed/triage unless seeded separately.
 - **Timeline live data:** `GET /api/feed` is implemented in `handler/feed.go` but `Timeline.jsx` still reads from `MOCK_FEED`. One-line fix to wire them up.
-- Update the pitch deck: Flask → Go + Gin, Gemini Flash → Nemotron via OpenRouter.
+- **Crisis insert timestamps:** `lib.crisisInsertBody` builds the insert payload for `CreateCrisis`/`UpsertCrisis` and omits `created_at`/`updated_at` so the DB `DEFAULT NOW()` applies. (Sending the struct serialised the zero `time.Time` as `0001-01-01T00:00:00Z` — `omitempty` doesn't work on a struct — which is why early reports showed a year-0001 date.)
+- **RBAC / report approval:** users carry a `role` (`resident` | `volunteer` | `coordinator`; in the JWT). `POST /api/crises` lets any authenticated user file a report — residents/volunteers create it `pending`, coordinators auto-`approved`. Only `approval_status='approved'` crises appear in `GET /api/crises` (map) and `GET /api/feed`. Coordinators review via `GET /api/crises/pending` and act with `POST /api/crises/:id/approve|reject` (gated by `middleware.RequireRole("coordinator")`). **Run migration `db/migrations/003_rbac_crisis_approval.sql` by hand** — it adds `users.role` (previously only assumed by `seed_users.sql`) and the `crises.approval_status/reported_by/approved_by` columns; without it these endpoints 500. Re-login after deploying so tokens carry the role. **Frontend wired:** `ReportCrisis.jsx` POSTs to `/api/crises` (maps vision type/severity to the table enums, sends geolocation lat/lng). The **approval workflow lives in the Feed** (`Timeline.jsx` + `components/feed/PendingReports.jsx`): coordinators see an **approval container** (`GET /api/crises/pending`, inline approve/reject); residents/volunteers see a **"your pending reports" container** (`GET /api/crises/mine`, scoped by `reported_by`) with a **View / Edit** modal (`PATCH /api/crises/:id` — owner may edit only while pending; coordinators may edit any). Both hide when empty. Once approved, the crisis appears as a **map marker** (`/api/crises`) and a **feed card** (`/api/feed`) — same row, two surfaces, both linking to `/crises/:id`. **Resolve:** coordinators get a **Resolve** button on active feed cards (`POST /api/crises/:id/resolve` → `status=resolved`); the feed now includes resolved crises (`GetCrisesPaged` dropped its `status` filter) and `feed.go` sorts them to the end, dimmed with a RESOLVED badge, while the map (`GetCrises`, still `status=eq.active`) drops them.
+
+**Photo report auto-fill:** `POST /api/chat/photo` now also returns `caption` (the vision model's one-line `Description`) and `tags` (built from the observation) even when there's no actionable `crisis_card`; `ReportCrisis.jsx` auto-fills the caption and suggested tags. **Readable location:** new `GET /api/geocode/reverse?lat=&lng=` (`handler/geocode.go`, OpenStreetMap Nominatim, keyless + cached) turns GPS coords into a human address that replaces the raw "≈ lat, lng" in the form.
+- Update the pitch deck: Flask → Go + Gin, Gemini Flash → OpenAI gpt-4.1-mini (single multimodal model, + Whisper for voice).

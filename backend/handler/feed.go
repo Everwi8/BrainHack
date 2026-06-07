@@ -13,7 +13,8 @@ import (
 
 type FeedItem struct {
 	ID           string  `json:"id"`
-	Tag          string  `json:"tag"` // URGENT_ALERT | LIVE | TRENDING | COMMUNITY
+	Tag          string  `json:"tag"`    // URGENT_ALERT | LIVE | TRENDING | COMMUNITY
+	Status       string  `json:"status"` // active | resolved
 	Title        string  `json:"title"`
 	Location     string  `json:"location"`
 	Body         string  `json:"body"`
@@ -65,21 +66,32 @@ func GetFeed(c *gin.Context) {
 		if !ok {
 			tag = "COMMUNITY"
 		}
+		status := crisis.Status
+		if status == "" {
+			status = "active"
+		}
 		items = append(items, FeedItem{
 			ID:         crisis.ID,
 			Tag:        tag,
+			Status:     status,
 			Title:      crisis.Title,
 			Location:   crisis.LocationName,
 			Body:       crisis.Description,
 			ImageURL:   nil,
 			CreatedAt:  crisis.CreatedAt.UTC().Format(time.RFC3339),
-			HelpNeeded: crisis.Severity != "low",
+			HelpNeeded: status == "active" && crisis.Severity != "low",
 		})
 	}
 
-	// Pin URGENT_ALERT first, then LIVE, TRENDING, COMMUNITY. Within each tag,
+	// Resolved crises sink to the bottom (kept as history). Among active ones,
+	// pin URGENT_ALERT first, then LIVE, TRENDING, COMMUNITY. Within each group,
 	// the original created_at.desc order from Supabase is preserved (SliceStable).
 	sort.SliceStable(items, func(i, j int) bool {
+		ri := items[i].Status == "resolved"
+		rj := items[j].Status == "resolved"
+		if ri != rj {
+			return !ri // active (false) sorts before resolved (true)
+		}
 		return tagPriority[items[i].Tag] < tagPriority[items[j].Tag]
 	})
 

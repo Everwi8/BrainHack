@@ -24,6 +24,11 @@ type Crisis struct {
 	Lng          float64   `json:"lng"`
 	LocationName string    `json:"location_name"`
 	Source       string    `json:"source,omitempty"`
+	// ApprovalStatus gates feed/map visibility: 'pending' | 'approved' | 'rejected'.
+	// omitempty so ingestion (which leaves it blank) falls back to the DB default.
+	ApprovalStatus string  `json:"approval_status,omitempty"`
+	ReportedBy   *string   `json:"reported_by,omitempty"`
+	ApprovedBy   *string   `json:"approved_by,omitempty"`
 	AISummary    string    `json:"ai_summary,omitempty"`
 	CreatedAt    time.Time `json:"created_at,omitempty"`
 	UpdatedAt    time.Time `json:"updated_at,omitempty"`
@@ -117,8 +122,10 @@ func (c *Client) req(method, path string, body interface{}, extra map[string]str
 
 // ─── Crises ──────────────────────────────────────────────────────────────────
 
+// GetCrises returns active, coordinator-approved crises (the public feed/map
+// set). Pending and rejected citizen reports are excluded.
 func (c *Client) GetCrises() ([]Crisis, error) {
-	data, err := c.req("GET", "crises?status=eq.active&select=*&order=created_at.desc", nil, nil)
+	data, err := c.req("GET", "crises?status=eq.active&approval_status=eq.approved&select=*&order=created_at.desc", nil, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -126,13 +133,37 @@ func (c *Client) GetCrises() ([]Crisis, error) {
 	return out, json.Unmarshal(data, &out)
 }
 
+// GetCrisesPaged backs the feed. Unlike GetCrises (map/triage) it includes
+// resolved crises too — the feed keeps them as history (sorted to the end by
+// the handler), while the map shows only active ones.
 func (c *Client) GetCrisesPaged(limit, offset int) ([]Crisis, error) {
-	path := fmt.Sprintf("crises?status=eq.active&select=*&order=created_at.desc&limit=%d&offset=%d", limit, offset)
+	path := fmt.Sprintf("crises?approval_status=eq.approved&select=*&order=created_at.desc&limit=%d&offset=%d", limit, offset)
 	data, err := c.req("GET", path, nil, nil)
 	if err != nil {
 		return nil, err
 	}
 	var out []Crisis
+	return out, json.Unmarshal(data, &out)
+}
+
+// GetPendingCrises returns citizen reports awaiting coordinator review.
+func (c *Client) GetPendingCrises() ([]Crisis, error) {
+	data, err := c.req("GET", "crises?approval_status=eq.pending&select=*&order=created_at.desc", nil, nil)
+	if err != nil {
+		return nil, err
+	}
+	out := []Crisis{}
+	return out, json.Unmarshal(data, &out)
+}
+
+// GetCrisesByReporter returns every crisis a given user filed, newest-first,
+// regardless of approval status (so they can track their own pending reports).
+func (c *Client) GetCrisesByReporter(userID string) ([]Crisis, error) {
+	data, err := c.req("GET", "crises?reported_by=eq."+userID+"&select=*&order=created_at.desc", nil, nil)
+	if err != nil {
+		return nil, err
+	}
+	out := []Crisis{}
 	return out, json.Unmarshal(data, &out)
 }
 
@@ -152,12 +183,102 @@ func (c *Client) GetCrisisByID(id string) (*CrisisWithTasks, error) {
 	return &rows[0], nil
 }
 
+// crisisInsertBody builds the JSON body for inserting a crisis, deliberately
+// omitting id/created_at/updated_at so the database defaults apply. Sending the
+// struct directly would serialise the zero time.Time as "0001-01-01T00:00:00Z"
+// (omitempty doesn't work on a struct), overriding created_at's DEFAULT NOW().
+func crisisInsertBody(cr Crisis) map[string]interface{} {
+	body := map[string]interface{}{
+		"title":         cr.Title,
+		"description":   cr.Description,
+		"type":          cr.Type,
+		"severity":      cr.Severity,
+		"lat":           cr.Lat,
+		"lng":           cr.Lng,
+		"location_name": cr.LocationName,
+	}
+	// Optional columns: omit when empty so the DB default takes over.
+	if cr.ExternalID != "" {
+		body["external_id"] = cr.ExternalID
+	}
+	if cr.Status != "" {
+		body["status"] = cr.Status
+	}
+	if cr.Source != "" {
+		body["source"] = cr.Source
+	}
+	if cr.AISummary != "" {
+		body["ai_summary"] = cr.AISummary
+	}
+	if cr.ApprovalStatus != "" {
+		body["approval_status"] = cr.ApprovalStatus
+	}
+	if cr.ReportedBy != nil {
+		body["reported_by"] = *cr.ReportedBy
+	}
+	if cr.ApprovedBy != nil {
+		body["approved_by"] = *cr.ApprovedBy
+	}
+	return body
+}
+
 // UpsertCrisis inserts or updates based on external_id (used by ingestion scripts).
 func (c *Client) UpsertCrisis(crisis Crisis) error {
-	_, err := c.req("POST", "crises?on_conflict=external_id", crisis, map[string]string{
+	_, err := c.req("POST", "crises?on_conflict=external_id", crisisInsertBody(crisis), map[string]string{
 		"Prefer": "resolution=merge-duplicates,return=representation",
 	})
 	return err
+}
+
+// CreateCrisis inserts a single crisis row (citizen report path) and returns it
+// with its generated id. Unlike UpsertCrisis it does not dedupe on external_id.
+func (c *Client) CreateCrisis(crisis Crisis) (*Crisis, error) {
+	data, err := c.req("POST", "crises", crisisInsertBody(crisis), map[string]string{
+		"Prefer": "return=representation",
+	})
+	if err != nil {
+		return nil, err
+	}
+	var rows []Crisis
+	if err := json.Unmarshal(data, &rows); err != nil || len(rows) == 0 {
+		return nil, fmt.Errorf("create crisis failed")
+	}
+	return &rows[0], nil
+}
+
+// UpdateCrisis applies a partial update to a crisis row and returns it.
+func (c *Client) UpdateCrisis(id string, updates map[string]interface{}) (*Crisis, error) {
+	data, err := c.req("PATCH", "crises?id=eq."+id, updates, map[string]string{
+		"Prefer": "return=representation",
+	})
+	if err != nil {
+		return nil, err
+	}
+	var rows []Crisis
+	if err := json.Unmarshal(data, &rows); err != nil || len(rows) == 0 {
+		return nil, fmt.Errorf("crisis not found")
+	}
+	return &rows[0], nil
+}
+
+// SetCrisisApproval transitions a report to 'approved' or 'rejected' and records
+// the actioning coordinator. Returns the updated row.
+func (c *Client) SetCrisisApproval(id, status, approverID string) (*Crisis, error) {
+	updates := map[string]interface{}{
+		"approval_status": status,
+		"approved_by":     approverID,
+	}
+	data, err := c.req("PATCH", "crises?id=eq."+id, updates, map[string]string{
+		"Prefer": "return=representation",
+	})
+	if err != nil {
+		return nil, err
+	}
+	var rows []Crisis
+	if err := json.Unmarshal(data, &rows); err != nil || len(rows) == 0 {
+		return nil, fmt.Errorf("crisis not found")
+	}
+	return &rows[0], nil
 }
 
 // ─── Tasks ───────────────────────────────────────────────────────────────────

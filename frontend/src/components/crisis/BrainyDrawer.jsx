@@ -41,7 +41,9 @@ function localReply(message, crisis) {
       ? `The PUB drain sensor here reads ${s.pub_drain_pct}% and rain is at ${s.nea_rain_mm ?? "—"}mm. ${s.pub_drain_pct > 80 ? "That's in ALERT range — flooding likely." : s.pub_drain_pct > 60 ? "That's a WARNING level — stay alert." : "Levels are okay for now."}`
       : "There's no live water-level sensor attached to this crisis right now.";
   }
-  return `I'm tracking ${crisis.title} (${crisis.address}). ${crisis.summary} Ask me about safety, the open tasks, or live sensor readings.`;
+  const summary = crisis.summary ?? crisis.description ?? "";
+  const address = crisis.address ?? crisis.location_name ?? "";
+  return `I'm tracking ${crisis.title}${address ? ` (${address})` : ""}.${summary ? ` ${summary}` : ""} Ask me about safety, the open tasks, or live sensor readings.`;
 }
 
 export default function BrainyDrawer({ open, onClose, crisis }) {
@@ -53,14 +55,18 @@ export default function BrainyDrawer({ open, onClose, crisis }) {
 
   // Reset the greeting whenever the drawer opens for a (possibly different) crisis.
   useEffect(() => {
-    if (open && crisis) {
-      setMessages([{
-        id: "greet",
-        role: "bot",
-        text: `Hi! I'm watching **${crisis.title}**. ${crisis.summary} Ask me anything — safety, tasks, or the live readings.`,
-        timestamp: nowTime(),
-      }]);
-    }
+    if (!open || !crisis) return;
+    // The crisis row uses `description`; older mock rows used `summary`. Prefer
+    // whichever is present so the greeting never renders "undefined".
+    const summary = crisis.summary ?? crisis.description ?? "";
+    // Defer so the seed lands in an async callback, not synchronously in the
+    // effect body (react-hooks/set-state-in-effect).
+    Promise.resolve().then(() => setMessages([{
+      id: "greet",
+      role: "bot",
+      text: `Hi! I'm watching **${crisis.title}**.${summary ? ` ${summary}` : ""} Ask me anything — safety, tasks, or the live readings.`,
+      timestamp: nowTime(),
+    }]));
   }, [open, crisis]);
 
   // Auto-scroll to the newest message.

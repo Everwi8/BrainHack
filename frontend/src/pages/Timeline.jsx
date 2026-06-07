@@ -1,7 +1,53 @@
-import { useMemo } from "react";
-import { useNavigate } from "react-router-dom";
+import { useCallback, useEffect, useState } from "react";
+import { useNavigate, useLocation } from "react-router-dom";
 import Navbar from "../components/layout/NavBar";
-import { MapPin, MessageCircle, Share2, AlertTriangle, Zap, Users } from "lucide-react";
+import { MapPin, MessageCircle, Share2, AlertTriangle, Zap, Users, CheckCircle2 } from "lucide-react";
+import { api } from "../lib/api";
+import { useAuth } from "../lib/auth";
+import { ApprovalContainer, MyPendingContainer } from "../components/feed/PendingReports";
+
+// Maps the backend feed's tag enum (handler/feed.go) to display styling.
+const TAG_DISPLAY = {
+  URGENT_ALERT: { label: "URGENT ALERT", color: "#EF4444", bg: "#FEF2F2", icon: "alert" },
+  LIVE:         { label: "LIVE",         color: "#EF4444", bg: "#FEF2F2", icon: "zap" },
+  TRENDING:     { label: "TRENDING",     color: "#D97706", bg: "#FFFBEB", icon: "zap" },
+  COMMUNITY:    { label: "COMMUNITY",    color: "#D97706", bg: "#FFFBEB", icon: "zap" },
+};
+
+// timeAgo renders a coarse relative timestamp from an ISO string.
+function timeAgo(iso) {
+  const then = new Date(iso).getTime();
+  if (!then) return "";
+  const secs = Math.max(0, Math.floor((Date.now() - then) / 1000));
+  if (secs < 60) return "Just now";
+  const mins = Math.floor(secs / 60);
+  if (mins < 60) return `${mins} min${mins > 1 ? "s" : ""} ago`;
+  const hrs = Math.floor(mins / 60);
+  if (hrs < 24) return `${hrs} hr${hrs > 1 ? "s" : ""} ago`;
+  const days = Math.floor(hrs / 24);
+  return `${days} day${days > 1 ? "s" : ""} ago`;
+}
+
+// toCard shapes a backend FeedItem into the props FeedCard renders. The feed
+// item id IS the crisis id, so "View Detail" opens the same /crises/:id page
+// the map markers link to — one crisis, two surfaces.
+function toCard(item) {
+  const d = TAG_DISPLAY[item.tag] ?? TAG_DISPLAY.COMMUNITY;
+  return {
+    id: item.id,
+    crisisId: item.id,
+    status: item.status || "active",
+    tag: d.label, tagColor: d.color, tagBg: d.bg, tagIcon: d.icon,
+    time: timeAgo(item.created_at),
+    title: item.title,
+    location: item.location || "Singapore",
+    body: item.body,
+    image: item.image_url || null,
+    comments: item.comment_count ?? 0,
+    shares: item.share_count ? String(item.share_count) : null,
+    helpNeeded: item.help_needed,
+  };
+}
 
 const MOCK_FEED = [
   {
@@ -103,7 +149,8 @@ function TagIcon({ type, color }) {
   return <Zap size={13} color={color} style={{ marginRight: 4 }} />;
 }
 
-function FeedCard({ item }) {
+function FeedCard({ item, onOpen, isCoordinator, onResolve, resolving }) {
+  const resolved = item.status === "resolved";
   return (
     <div style={{
       background: "#fff",
@@ -111,18 +158,31 @@ function FeedCard({ item }) {
       padding: "20px 24px",
       marginBottom: 16,
       boxShadow: "0 1px 4px rgba(0,0,0,0.07)",
-      borderLeft: item.tag === "URGENT ALERT" ? "4px solid #EF4444" : "none",
+      borderLeft: !resolved && item.tag === "URGENT ALERT" ? "4px solid #EF4444" : "none",
+      // Resolved crises stay as history — dimmed so active ones read first.
+      opacity: resolved ? 0.6 : 1,
     }}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
-        <span style={{
-          display: "inline-flex", alignItems: "center",
-          background: item.tagBg, color: item.tagColor,
-          fontWeight: 700, fontSize: 11, letterSpacing: 0.8,
-          padding: "3px 10px", borderRadius: 20,
-        }}>
-          <TagIcon type={item.tagIcon} color={item.tagColor} />
-          {item.tag}
-        </span>
+        {resolved ? (
+          <span style={{
+            display: "inline-flex", alignItems: "center", gap: 4,
+            background: "#DCFCE7", color: "#15803D",
+            fontWeight: 700, fontSize: 11, letterSpacing: 0.8,
+            padding: "3px 10px", borderRadius: 20,
+          }}>
+            <CheckCircle2 size={13} /> RESOLVED
+          </span>
+        ) : (
+          <span style={{
+            display: "inline-flex", alignItems: "center",
+            background: item.tagBg, color: item.tagColor,
+            fontWeight: 700, fontSize: 11, letterSpacing: 0.8,
+            padding: "3px 10px", borderRadius: 20,
+          }}>
+            <TagIcon type={item.tagIcon} color={item.tagColor} />
+            {item.tag}
+          </span>
+        )}
         <span style={{ color: "#aaa", fontSize: 12 }}>{item.time}</span>
       </div>
 
@@ -170,23 +230,43 @@ function FeedCard({ item }) {
             </span>
           )}
         </div>
-        <a
-          href={item.action.href}
-          style={{
-            padding: "8px 18px",
-            borderRadius: 24,
-            border: "none",
-            background: item.action.primary ? "#1a1a2e" : "none",
-            color: item.action.primary ? "#fff" : "#1a1a2e",
-            fontFamily: "'Nunito', sans-serif",
-            fontWeight: 700,
-            fontSize: 13,
-            cursor: "pointer",
-            textDecoration: "none",
-          }}
-        >
-          {item.action.label}
-        </a>
+        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+          {/* Coordinators can mark an active crisis resolved once help is done.
+              It then sinks to the end of the feed and drops off the map. */}
+          {isCoordinator && !resolved && item.crisisId && (
+            <button
+              onClick={() => onResolve?.(item.crisisId)}
+              disabled={resolving}
+              style={{
+                display: "flex", alignItems: "center", gap: 5,
+                padding: "8px 16px", borderRadius: 24,
+                border: "1px solid #16A34A", background: "none", color: "#15803D",
+                fontFamily: "'Nunito', sans-serif", fontWeight: 700, fontSize: 13,
+                cursor: resolving ? "default" : "pointer", opacity: resolving ? 0.6 : 1,
+              }}
+            >
+              <CheckCircle2 size={14} /> {resolving ? "Resolving…" : "Resolve"}
+            </button>
+          )}
+          <button
+            onClick={() => item.crisisId && onOpen?.(item.crisisId)}
+            disabled={!item.crisisId}
+            style={{
+              padding: "8px 18px",
+              borderRadius: 24,
+              border: "none",
+              background: "#1a1a2e",
+              color: "#fff",
+              fontFamily: "'Nunito', sans-serif",
+              fontWeight: 700,
+              fontSize: 13,
+              cursor: item.crisisId ? "pointer" : "default",
+              opacity: item.crisisId ? 1 : 0.5,
+            }}
+          >
+            View Detail
+          </button>
+        </div>
       </div>
     </div>
   );
@@ -194,16 +274,48 @@ function FeedCard({ item }) {
 
 export default function Timeline() {
   const navigate = useNavigate();
-  // Reports submitted from the Report Crisis page are persisted to localStorage
-  // and shown at the top of the feed.
-  const reports = useMemo(() => {
-    try {
-      return JSON.parse(localStorage.getItem("brainy_reports") || "[]");
-    } catch {
-      return [];
-    }
+  const location = useLocation();
+  const { user } = useAuth();
+  const isCoordinator = user?.role === "coordinator";
+  // One-off banner after submitting a report ("…will be reviewed" / "published").
+  const [flash, setFlash] = useState(location.state?.flash || "");
+
+  // The feed is derived from approved crises (GET /api/feed) — the exact same
+  // rows the map renders as markers, just presented as cards. Pending reports
+  // are excluded by the backend until a coordinator approves them.
+  const [feed, setFeed] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [failed, setFailed] = useState(false);
+  const [resolvingId, setResolvingId] = useState(null);
+
+  const loadFeed = useCallback(() => {
+    return api.get("/api/feed")
+      .then((d) => setFeed(Array.isArray(d?.items) ? d.items.map(toCard) : []))
+      .catch((err) => { console.error("load feed:", err); setFailed(true); });
   }, []);
-  const feed = [...reports, ...MOCK_FEED];
+
+  useEffect(() => {
+    loadFeed().finally(() => setLoading(false));
+  }, [loadFeed]);
+
+  const openCrisis = (id) => navigate(`/crises/${id}`);
+
+  // Coordinator resolves a crisis → it leaves the map and re-sorts to the feed
+  // end. Refetch so the new order/status comes straight from the backend.
+  const resolveCrisis = async (id) => {
+    setResolvingId(id);
+    try {
+      await api.post(`/api/crises/${id}/resolve`);
+      await loadFeed();
+    } catch (err) {
+      console.error("resolve crisis:", err);
+    } finally {
+      setResolvingId(null);
+    }
+  };
+  // On a backend failure, fall back to the static sample feed so the page isn't
+  // blank during a demo; otherwise show the live cards.
+  const items = failed ? MOCK_FEED : feed;
 
   return (
     <div style={{ minHeight: "100vh", background: "#F5F0E8", fontFamily: "'Nunito', sans-serif" }}>
@@ -257,7 +369,47 @@ export default function Timeline() {
 
         {/* Center feed */}
         <div>
-          {feed.map(item => <FeedCard key={item.id} item={item} />)}
+          {flash && (
+            <div style={{
+              display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12,
+              background: "#ECFDF5", border: "1px solid #A7F3D0", color: "#065F46",
+              borderRadius: 12, padding: "12px 16px", marginBottom: 16,
+              fontSize: 14, fontWeight: 600,
+            }}>
+              <span>{flash}</span>
+              <button
+                onClick={() => setFlash("")}
+                aria-label="Dismiss"
+                style={{ background: "none", border: "none", cursor: "pointer", color: "#065F46", fontWeight: 800, fontSize: 16 }}
+              >×</button>
+            </div>
+          )}
+
+          {/* Report-approval workflow: coordinators see the approval queue;
+              everyone else sees their own reports still awaiting review. */}
+          {isCoordinator ? <ApprovalContainer /> : <MyPendingContainer />}
+
+          {loading ? (
+            <div style={{ color: "#888", fontSize: 14, padding: "24px 4px" }}>Loading feed…</div>
+          ) : items.length === 0 ? (
+            <div style={{
+              background: "#fff", borderRadius: 16, padding: "32px 24px",
+              boxShadow: "0 1px 4px rgba(0,0,0,0.07)", textAlign: "center", color: "#888", fontSize: 14,
+            }}>
+              No active crises right now. Tap <strong>Report Crisis</strong> to file one.
+            </div>
+          ) : (
+            items.map(item => (
+              <FeedCard
+                key={item.id}
+                item={item}
+                onOpen={openCrisis}
+                isCoordinator={isCoordinator}
+                onResolve={resolveCrisis}
+                resolving={resolvingId === item.crisisId}
+              />
+            ))
+          )}
         </div>
 
         {/* Right panel */}

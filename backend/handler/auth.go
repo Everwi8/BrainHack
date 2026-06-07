@@ -54,7 +54,7 @@ func Register(c *gin.Context) {
 		return
 	}
 
-	token, err := issueToken(user.ID, user.Email)
+	token, err := issueToken(user.ID, user.Email, user.Role)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "could not issue token"})
 		return
@@ -84,7 +84,7 @@ func Login(c *gin.Context) {
 		return
 	}
 
-	token, err := issueToken(user.ID, user.Email)
+	token, err := issueToken(user.ID, user.Email, user.Role)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "could not issue token"})
 		return
@@ -96,10 +96,11 @@ func Login(c *gin.Context) {
 	})
 }
 
-func issueToken(userID, email string) (string, error) {
+func issueToken(userID, email, role string) (string, error) {
 	claims := middleware.Claims{
 		UserID: userID,
 		Email:  email,
+		Role:   role,
 		RegisteredClaims: jwt.RegisteredClaims{
 			ExpiresAt: jwt.NewNumericDate(time.Now().Add(72 * time.Hour)),
 			IssuedAt:  jwt.NewNumericDate(time.Now()),

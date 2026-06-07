@@ -3,17 +3,10 @@ import { useNavigate } from "react-router-dom";
 import Navbar from "../components/layout/NavBar";
 import BrainyMascot from "../components/BrainyMascot";
 import {
-  Bell, MapPin, Camera, Mic, Building2, Home as HomeIcon,
+  MapPin, Camera, Mic, Building2, Home as HomeIcon,
   Users, Flame, Car, Package, Info, Send, AlertCircle,
   Waves, ChevronLeft, ChevronRight, CheckCircle
 } from "lucide-react";
-
-const NAV_LINKS = [
-  { label: "Home",  path: "/" },
-  { label: "Map",   path: "/map" },
-  { label: "Tasks", path: "/crisis" },
-  { label: "Chat",  path: "/chat" },
-];
 
 const helpOptions = [
   {

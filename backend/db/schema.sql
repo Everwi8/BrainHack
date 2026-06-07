@@ -8,6 +8,9 @@ CREATE TABLE IF NOT EXISTS users (
   email         TEXT        UNIQUE NOT NULL,
   password_hash TEXT        NOT NULL,
   name          TEXT        NOT NULL DEFAULT '',
+  role          TEXT        NOT NULL DEFAULT 'resident'
+                  CONSTRAINT user_role_valid
+                  CHECK (role IN ('resident','volunteer','coordinator')),
   created_at    TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
@@ -33,6 +36,13 @@ CREATE TABLE IF NOT EXISTS crises (
   source        TEXT        NOT NULL DEFAULT 'user'
                   CONSTRAINT crisis_source_valid
                   CHECK (source IN ('nea','lta','pub','moh','user')),
+  -- Citizen reports start 'pending' and only surface in feed/map once a
+  -- coordinator approves. Machine-ingested crises default to 'approved'.
+  approval_status TEXT      NOT NULL DEFAULT 'approved'
+                  CONSTRAINT crisis_approval_valid
+                  CHECK (approval_status IN ('pending','approved','rejected')),
+  reported_by   UUID        REFERENCES users(id),
+  approved_by   UUID        REFERENCES users(id),
   ai_summary    TEXT        NOT NULL DEFAULT '',
   created_at    TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   updated_at    TIMESTAMPTZ NOT NULL DEFAULT NOW()
@@ -41,6 +51,7 @@ CREATE TABLE IF NOT EXISTS crises (
 CREATE INDEX IF NOT EXISTS idx_crises_status     ON crises(status);
 CREATE INDEX IF NOT EXISTS idx_crises_location   ON crises(lat, lng);
 CREATE INDEX IF NOT EXISTS idx_crises_type       ON crises(type);
+CREATE INDEX IF NOT EXISTS idx_crises_approval   ON crises(approval_status);
 
 -- ─── Tasks ───────────────────────────────────────────────────────────────────
 CREATE TABLE IF NOT EXISTS tasks (

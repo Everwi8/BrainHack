@@ -19,6 +19,34 @@ function tagsFromType(type) {
   return [primary, ...extras].slice(0, 3);
 }
 
+// The vision model's crisis_type vocabulary is broader than the crises table's
+// CHECK constraint (flood|haze|dengue|mrt|fire|other). Map the known ones;
+// everything else (road_accident, fallen_tree, medical, …) becomes "other".
+const TYPE_MAP = {
+  flood: "flood", fire: "fire", haze: "haze", dengue: "dengue",
+  transport: "mrt", mrt: "mrt",
+};
+function toCrisisType(detectedType, selectedTags) {
+  if (detectedType && TYPE_MAP[detectedType]) return TYPE_MAP[detectedType];
+  // Fall back to a hint from the chosen tags, e.g. "#flood".
+  for (const t of selectedTags || []) {
+    const key = t.replace(/^#/, "").toLowerCase();
+    if (TYPE_MAP[key]) return TYPE_MAP[key];
+  }
+  return "other";
+}
+
+// Map the triage severity vocabulary (low|warning|critical) returned by the
+// vision endpoint to the crises-table vocabulary (low|medium|high|critical).
+function toCrisisSeverity(detectedSeverity) {
+  switch (detectedSeverity) {
+    case "critical": return "critical";
+    case "warning":  return "high";
+    case "low":      return "low";
+    default:         return "medium";
+  }
+}
+
 function SpeechBubble({ children }) {
   return (
     <div
@@ -62,6 +90,10 @@ export default function ReportCrisis() {
   const [analyzing, setAnalyzing] = useState(false);
   const [streaming, setStreaming] = useState(false);
   const [cameraReady, setCameraReady] = useState(true); // false → show upload fallback
+  const [detected, setDetected] = useState(null);       // { type, severity } from the vision read
+  const [coords, setCoords] = useState(null);           // { lat, lng } from geolocation
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState("");
 
   const videoRef = useRef(null);
   const streamRef = useRef(null);
@@ -107,8 +139,22 @@ export default function ReportCrisis() {
   useEffect(() => {
     if (!navigator.geolocation) return;
     navigator.geolocation.getCurrentPosition(
-      (pos) =>
-        setLocation((prev) => prev || `≈ ${pos.coords.latitude.toFixed(4)}, ${pos.coords.longitude.toFixed(4)}`),
+      async (pos) => {
+        const { latitude: lat, longitude: lng } = pos.coords;
+        // Keep numeric coords for the map marker, plus a human label for the form.
+        setCoords({ lat, lng });
+        setLocation((prev) => prev || `≈ ${lat.toFixed(4)}, ${lng.toFixed(4)}`);
+        // Upgrade the raw coords to a readable address (best-effort). Don't clobber
+        // a value the user has already typed — only replace the auto coords.
+        try {
+          const g = await api.get(`/api/geocode/reverse?lat=${lat}&lng=${lng}`);
+          if (g?.address) {
+            setLocation((prev) => (!prev || prev.startsWith("≈ ") ? g.address : prev));
+          }
+        } catch {
+          // keep the coordinate fallback
+        }
+      },
       () => {},
       { timeout: 8000 },
     );
@@ -160,9 +206,16 @@ export default function ReportCrisis() {
       const res = await api.postForm("/api/chat/photo", form);
       if (res.session_id) sessionRef.current = res.session_id;
 
-      const suggested = tagsFromType(res?.crisis_card?.type);
+      // Auto-fill the caption from the vision read (don't overwrite a user edit).
+      if (res.caption) setCaption((prev) => prev || res.caption);
+
+      // Prefer the backend's observation-derived tags; fall back to type-only.
+      const suggested = res.tags?.length ? res.tags : tagsFromType(res?.crisis_card?.type);
       setTags(suggested);
-      if (res?.crisis_card?.type) setSelectedTags([suggested[0]]);
+      if (suggested.length) setSelectedTags([suggested[0]]);
+      if (res?.crisis_card) {
+        setDetected({ type: res.crisis_card.type, severity: res.crisis_card.severity });
+      }
     } catch {
       setTags(DEFAULT_TAGS);
     } finally {
@@ -173,32 +226,42 @@ export default function ReportCrisis() {
   const toggleTag = (t) =>
     setSelectedTags((prev) => (prev.includes(t) ? prev.filter((x) => x !== t) : [...prev, t]));
 
-  const submit = () => {
-    if (!captured) return;
-    const report = {
-      id: `r-${Date.now()}`,
-      tag: "YOUR REPORT",
-      tagColor: "#D97706",
-      tagBg: "#FFFBEB",
-      tagIcon: "zap",
-      time: "Just now",
-      title: caption.trim() || "Citizen crisis report",
-      location: location.trim() || "Location not specified",
-      body: caption.trim(),
-      tags: selectedTags,
-      image: captured.dataUrl,
-      comments: 0,
-      shares: null,
-      helpNeeded: true,
-      action: { label: "View Detail", primary: true, href: "/crisis" },
-    };
+  // submit persists the report to the backend (POST /api/crises). Residents'
+  // and volunteers' reports are created 'pending' and only appear in the feed /
+  // on the map once a coordinator approves them; a coordinator's own report is
+  // auto-approved and shows immediately.
+  const submit = async () => {
+    if (!captured || submitting) return;
+    setSubmitting(true);
+    setError("");
+
+    // Geolocation may be denied — fall back to Singapore centre so the marker
+    // still lands on the island once the report is approved.
+    const lat = coords?.lat ?? 1.3521;
+    const lng = coords?.lng ?? 103.8198;
+
     try {
-      const existing = JSON.parse(localStorage.getItem("brainy_reports") || "[]");
-      localStorage.setItem("brainy_reports", JSON.stringify([report, ...existing]));
-    } catch {
-      // ignore storage quota / parse errors — still navigate to the feed
+      const created = await api.post("/api/crises", {
+        title: caption.trim() || "Citizen crisis report",
+        description: caption.trim(),
+        type: toCrisisType(detected?.type, selectedTags),
+        severity: toCrisisSeverity(detected?.severity),
+        lat,
+        lng,
+        location_name: location.trim() || "Location not specified",
+      });
+      const approved = created?.approval_status === "approved";
+      navigate("/timeline", {
+        state: {
+          flash: approved
+            ? "Report published — it's now in the feed and on the map."
+            : "Report submitted. A coordinator will review it before it appears in the feed and on the map.",
+        },
+      });
+    } catch (err) {
+      setError(err.message || "Could not submit report. Please try again.");
+      setSubmitting(false);
     }
-    navigate("/timeline");
   };
 
   return (
@@ -353,15 +416,21 @@ export default function ReportCrisis() {
 
               <button
                 onClick={submit}
+                disabled={submitting}
                 style={{
                   alignSelf: "flex-start", background: "#1a1a2e", color: "#fff",
                   border: "none", borderRadius: 10, padding: "10px 28px",
-                  fontFamily: MONO, fontWeight: 700, fontSize: 14, cursor: "pointer",
-                  letterSpacing: 1,
+                  fontFamily: MONO, fontWeight: 700, fontSize: 14,
+                  cursor: submitting ? "default" : "pointer",
+                  opacity: submitting ? 0.6 : 1, letterSpacing: 1,
                 }}
               >
-                POST
+                {submitting ? "POSTING…" : "POST"}
               </button>
+
+              {error && (
+                <div style={{ fontFamily: MONO, fontSize: 12, color: "#B91C1C" }}>{error}</div>
+              )}
 
               <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 8, marginTop: 8 }}>
                 <SpeechBubble>Image successfully captured! Add a description for this situation, so that other users can be aware.</SpeechBubble>

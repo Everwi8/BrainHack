@@ -3,6 +3,7 @@ package middleware
 import (
 	"net/http"
 	"os"
+	"slices"
 	"strings"
 
 	"github.com/gin-gonic/gin"
@@ -12,6 +13,7 @@ import (
 type Claims struct {
 	UserID string `json:"user_id"`
 	Email  string `json:"email"`
+	Role   string `json:"role"`
 	jwt.RegisteredClaims
 }
 
@@ -39,6 +41,21 @@ func RequireAuth() gin.HandlerFunc {
 
 		c.Set("userID", claims.UserID)
 		c.Set("email", claims.Email)
+		c.Set("role", claims.Role)
 		c.Next()
+	}
+}
+
+// RequireRole gates a route to one of the given roles. Must run after
+// RequireAuth (it reads the role injected into the context). Tokens issued
+// before roles existed carry an empty role and are rejected — re-login mints a
+// fresh token with the role embedded.
+func RequireRole(roles ...string) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		if slices.Contains(roles, c.GetString("role")) {
+			c.Next()
+			return
+		}
+		c.AbortWithStatusJSON(http.StatusForbidden, gin.H{"error": "insufficient permissions"})
 	}
 }

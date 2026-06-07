@@ -62,10 +62,21 @@ func main() {
 		api.POST("/auth/register", handler.Register)
 		api.POST("/auth/login", handler.Login)
 
-		// Crises (public read)
+		// Crises (public read; only approved crises surface here)
 		api.GET("/crises", handler.ListCrises)
 		api.GET("/crises/:id", handler.GetCrisis)
 		api.GET("/crises/:id/triage", handler.CrisisTriage) // triage + tasks for one crisis
+
+		// Crisis reporting + approval (RBAC):
+		//   any authenticated user can file a report (coordinators' are auto-approved);
+		//   only coordinators can review/approve/reject the pending queue.
+		api.POST("/crises", middleware.RequireAuth(), handler.CreateCrisis)
+		api.PATCH("/crises/:id", middleware.RequireAuth(), handler.UpdateCrisis)
+		api.GET("/crises/mine", middleware.RequireAuth(), handler.ListMyCrises)
+		api.GET("/crises/pending", middleware.RequireAuth(), middleware.RequireRole("coordinator"), handler.ListPendingCrises)
+		api.POST("/crises/:id/approve", middleware.RequireAuth(), middleware.RequireRole("coordinator"), handler.ApproveCrisis)
+		api.POST("/crises/:id/reject", middleware.RequireAuth(), middleware.RequireRole("coordinator"), handler.RejectCrisis)
+		api.POST("/crises/:id/resolve", middleware.RequireAuth(), middleware.RequireRole("coordinator"), handler.ResolveCrisis)
 
 		// Tasks — reads are public, writes require auth
 		api.GET("/tasks", handler.ListTasks)
@@ -92,6 +103,7 @@ func main() {
 		api.GET("/data/dengue", handler.GetDengue)
 		api.GET("/hospitals", handler.GetHospitals)
 		api.GET("/feed", handler.GetFeed)
+		api.GET("/geocode/reverse", handler.ReverseGeocode) // lat/lng → readable address
 
 		// Jerald — map markers
 		api.GET("/map/markers", handler.MapMarkers)
@@ -100,8 +112,7 @@ func main() {
 		// James — volunteers + voice
 		api.GET("/volunteers", handler.ListVolunteers)
 		api.POST("/volunteers", middleware.RequireAuth(), handler.RegisterVolunteer)
-		api.POST("/voice", handler.Voice) // testing without auth
-		// api.POST("/voice", middleware.RequireAuth(), handler.Voice)
+		api.POST("/voice", middleware.RequireAuth(), handler.Voice)
 
 		// Admin — runtime demo/live data toggle (open for demo simplicity)
 		api.GET("/admin/data-source", handler.DataSourceStatus)

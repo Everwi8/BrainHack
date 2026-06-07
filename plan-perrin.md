@@ -138,7 +138,7 @@ card renders, driven by the real vision read. Fully demoable, all in our files.
 ### Phase B — persist / map / volunteer-visible (multi-person)
 | Step | Work | Owner | Blocks |
 |------|------|-------|--------|
-| B1 | Create a `crises` row from a photo report (ingest/create path or `POST /api/crises`), returns real `crisis_id` | **Sanjey** (owns crises table, schema, `main.go`) | all below |
+| B1 | ✅ **DONE** — `POST /api/crises` creates a `crises` row and returns the real `crisis_id` (`handler.CreateCrisis` + `lib.DB.CreateCrisis`). **RBAC layered on:** any authenticated user can report; residents/volunteers create `approval_status='pending'`, coordinators auto-`approved`. Only approved crises show in feed/map (`GetCrises`/`GetCrisesPaged` filter `approval_status=eq.approved`). Coordinator review: `GET /api/crises/pending`, `POST /api/crises/:id/approve\|reject` (gated by `RequireRole("coordinator")`). Run migration `003_rbac_crisis_approval.sql`. | **Sanjey** (owns crises table, schema, `main.go`) | all below |
 | B2 | Add `priority`/`volunteers_needed`/`type`/`location` to `tasks` + `Task` (=#3) | **Sanjey** | rich task persistence |
 | B3 | Thread `crisis_id` → `GenerateTaskCards` → `ForwardTasks` (already writes when `FORWARD_TASKS=1` + id present) | **Perrin** | needs B1, B2 |
 | B4 | Photo crisis on map / crisis detail | **Jerald** (already reads `GET /api/crises` — free once persisted) | needs B1 |

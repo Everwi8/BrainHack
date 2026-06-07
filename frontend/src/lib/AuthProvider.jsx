@@ -40,8 +40,9 @@ export function AuthProvider({ children }) {
           role: role || "resident",
         });
       }
-      // The backend user has no role column; carry the demo role client-side.
-      const merged = { ...data.user, role: role ?? data.user?.role ?? null };
+      // Prefer the role the backend returns; fall back to the requested demo
+      // role (e.g. first-time preset register) so RBAC-gated UI works either way.
+      const merged = { ...data.user, role: data.user?.role ?? role ?? null };
       persist(data.token, merged);
       return merged;
     },

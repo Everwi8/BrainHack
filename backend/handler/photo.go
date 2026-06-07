@@ -98,9 +98,44 @@ func ChatPhoto(c *gin.Context) {
 		"image_url":  imageURL,
 	}
 	if obs != nil {
+		// Surface the structured read so the report form can auto-fill: a factual
+		// one-line caption and suggested tags, regardless of whether the photo
+		// rises to an actionable crisis card.
+		if obs.Description != "" {
+			resp["caption"] = obs.Description
+		}
+		resp["tags"] = suggestPhotoTags(*obs)
 		if finding, ok := lib.ObservationToFinding(*obs, caption); ok {
 			resp["crisis_card"] = finding
 		}
 	}
 	c.JSON(http.StatusOK, resp)
+}
+
+// suggestPhotoTags builds a short hashtag list from the vision observation for
+// the report form's "suggested tags". Leads with the detected crisis type, adds
+// a help/urgency hint, and always ends with #sg. Capped at four.
+func suggestPhotoTags(obs lib.PhotoObservation) []string {
+	tags := []string{}
+	seen := map[string]bool{}
+	add := func(t string) {
+		if t != "" && !seen[t] {
+			seen[t] = true
+			tags = append(tags, t)
+		}
+	}
+	if t := obs.CrisisType; t != "" && t != "none" && t != "other" {
+		add("#" + strings.ReplaceAll(t, "_", ""))
+	}
+	if obs.PeoplePresent || obs.CrisisType == "medical" {
+		add("#help")
+	}
+	if obs.Severity == "high" || obs.Severity == "warning" {
+		add("#urgent")
+	}
+	add("#sg")
+	if len(tags) > 4 {
+		tags = tags[:4]
+	}
+	return tags
 }
