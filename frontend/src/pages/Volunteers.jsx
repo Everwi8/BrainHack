@@ -6,43 +6,28 @@ import { useVoiceRecorder, extensionFromMime } from "../lib/useVoiceRecorder";
 
 const API_BASE_URL = import.meta.env.VITE_API_URL ?? "http://localhost:8080";
 
-// dummy data for volunteer groups and messages
-const GROUPS = [
-  {
-    id: "brainy",
-    label: "Brainy",
-    title: "Brainy Coordination Channel",
-    meta: "Islandwide Monitoring • 18 helpers • 5 Open Tasks",
-    messages: [
-      { id: "b1", sender: "Brainy • auto-update", role: "brainy", text: "Heavy rain cells moving toward North region. Flood risk elevated for Kranji in the next 30 minutes.", at: "09:11" },
-      { id: "b2", sender: "RC Lim (Coordinator)", role: "coord", text: "Deploy 2 volunteers to Kranji drain point B. Confirm when dispatched.", at: "09:13" },
-      { id: "b3", sender: "Me", role: "me", text: "Copy. Pairing up and moving now.", at: "09:14" },
-    ],
-  },
-  {
-    id: "flash-flood",
-    label: "Flash Flood • 12",
-    title: "Flash Flood - Pasir Ris Dr 3",
-    meta: "Water 78% • 12 helpers • 3 Open Tasks",
-    messages: [
-      { id: "f1", sender: "Brainy • auto-update", role: "brainy", text: "PUB drain at 78%, up from 65% 15 min ago", at: "09:22" },
-      { id: "f2", sender: "Aisha (Coordinator)", role: "coord", text: "PUB drain at 78%, up from 65% 15 min ago", at: "09:25" },
-      { id: "f3", sender: "Me", role: "me", text: "I am on my way, 8 more minutes", at: "09:26" },
-      { id: "f4", sender: "Brainy • auto-update", role: "brainy", text: "New task created by RC Lim: \"Reroute pedestrians at gate 3\"", at: "09:29" },
-    ],
-  },
-  {
-    id: "fire",
-    label: "Fire • 5",
-    title: "Fire - Bedok North Ave 3",
-    meta: "Smoke level Medium • 5 helpers • 2 Open Tasks",
-    messages: [
-      { id: "r1", sender: "Brainy • auto-update", role: "brainy", text: "SCDF response team on-site. Keep perimeter clear for emergency vehicles.", at: "11:01" },
-      { id: "r2", sender: "Hassan (Coordinator)", role: "coord", text: "Need 1 volunteer to guide evacuees to temporary shelter point.", at: "11:03" },
-      { id: "r3", sender: "Me", role: "me", text: "Available. Moving to shelter point now.", at: "11:04" },
-    ],
-  },
-];
+function toTitleCase(value = "") {
+  if (!value) return "";
+  return value.charAt(0).toUpperCase() + value.slice(1);
+}
+
+function tabLabelFromTitle(title = "") {
+  if (!title) return "Crisis";
+  return title.length > 22 ? `${title.slice(0, 22)}...` : title;
+}
+
+function mapCrisisToTab(crisis) {
+  return {
+    id: crisis.id,
+    label: tabLabelFromTitle(crisis.title),
+    title: crisis.title,
+    meta: [
+      toTitleCase(crisis.type),
+      toTitleCase(crisis.severity),
+      crisis.location_name || "",
+    ].filter(Boolean).join(" • "),
+  };
+}
 
 function senderBadge(role) {
   if (role === "brainy") return "#B9D530";
@@ -57,29 +42,27 @@ function formatDuration(seconds) {
 }
 
 export default function Volunteers() {
-  const [activeGroup, setActiveGroup] = useState("flash-flood");
+  const [activeGroup, setActiveGroup] = useState("");
+  const [crisisTabs, setCrisisTabs] = useState([]);
   const [draft, setDraft] = useState("");
-  const [messagesByGroup, setMessagesByGroup] = useState(() =>
-    GROUPS.reduce((acc, item) => {
-      acc[item.id] = item.messages.map((msg) => ({ ...msg }));
-      return acc;
-    }, {})
-  );
+  const [messagesByGroup, setMessagesByGroup] = useState({});
   const [isSendingVoice, setIsSendingVoice] = useState(false);
   const [pendingVoiceClip, setPendingVoiceClip] = useState(null);
   const [voiceStatus, setVoiceStatus] = useState("");
   const [voiceSessionByGroup, setVoiceSessionByGroup] = useState({});
+  const [isLoadingCrises, setIsLoadingCrises] = useState(true);
+  const [crisesError, setCrisesError] = useState("");
 
   const { isRecording, recordingSeconds, start: startRecorder, stop: stopRecorder } = useVoiceRecorder();
 
   const clipUrlsRef = useRef([]);
 
-  const group = useMemo(
-    () => GROUPS.find((item) => item.id === activeGroup) ?? GROUPS[0],
-    [activeGroup]
-  );
+  const group = useMemo(() => {
+    if (crisisTabs.length === 0) return null;
+    return crisisTabs.find((item) => item.id === activeGroup) ?? crisisTabs[0];
+  }, [activeGroup, crisisTabs]);
   const messages = messagesByGroup[activeGroup] ?? [];
-  const canSend = Boolean(draft.trim() || pendingVoiceClip) && !isRecording && !isSendingVoice;
+  const canSend = Boolean(activeGroup) && Boolean(draft.trim() || pendingVoiceClip) && !isRecording && !isSendingVoice;
   const statusText = isRecording
     ? `Recording ${formatDuration(recordingSeconds)}...`
     : isSendingVoice
@@ -89,6 +72,63 @@ export default function Volunteers() {
   // Revoke any object URLs we created for clip playback on unmount.
   useEffect(() => {
     return () => clipUrlsRef.current.forEach((url) => URL.revokeObjectURL(url));
+  }, []);
+
+  useEffect(() => {
+    let ignore = false;
+
+    const loadCrises = async () => {
+      if (!ignore) setIsLoadingCrises(true);
+      try {
+        const res = await fetch(`${API_BASE_URL}/api/crises`);
+        const payload = await readJSONSafe(res);
+        if (!res.ok) {
+          throw new Error(payload.error ?? payload.__raw ?? `Could not load crises: ${res.status}`);
+        }
+
+        const rows = Array.isArray(payload) ? payload : [];
+        const tabs = rows
+          .filter((row) => row?.id && row?.title && row?.status === "active")
+          .map((row) => mapCrisisToTab({
+            id: row.id,
+            title: row.title,
+            type: row.type,
+            severity: row.severity,
+            location_name: row.location_name,
+          }));
+
+        if (ignore) return;
+        setCrisisTabs(tabs);
+        setMessagesByGroup((prev) => {
+          const next = {};
+          tabs.forEach((tab) => {
+            next[tab.id] = prev[tab.id] ?? [];
+          });
+          return next;
+        });
+        setActiveGroup((prev) => {
+          if (tabs.length === 0) return "";
+          if (prev && tabs.some((tab) => tab.id === prev)) return prev;
+          return tabs[0].id;
+        });
+        setCrisesError("");
+      } catch (err) {
+        if (!ignore) {
+          setCrisesError(err?.message || "Could not load crises.");
+          setCrisisTabs([]);
+          setActiveGroup("");
+        }
+      } finally {
+        if (!ignore) setIsLoadingCrises(false);
+      }
+    };
+
+    loadCrises();
+    const timer = setInterval(loadCrises, 30000);
+    return () => {
+      ignore = true;
+      clearInterval(timer);
+    };
   }, []);
 
   const clearPendingVoiceClip = (nextStatus = "") => {
@@ -113,6 +153,10 @@ export default function Volunteers() {
   };
 
   const startVoiceRecording = async () => {
+    if (!activeGroup) {
+      setVoiceStatus("No active crisis group selected.");
+      return;
+    }
     clearPendingVoiceClip();
     const err = await startRecorder();
     if (err) {
@@ -178,7 +222,7 @@ export default function Volunteers() {
   };
 
   const handleSendMessage = async () => {
-    if (!canSend) return;
+    if (!canSend || !activeGroup) return;
 
     const outgoingText = draft.trim();
     const now = () => new Date().toLocaleTimeString("en-SG", { hour: "2-digit", minute: "2-digit" });
@@ -283,7 +327,7 @@ export default function Volunteers() {
         }}
       >
         <div style={{ display: "flex", gap: 12, marginBottom: 12, flexWrap: "wrap" }}>
-          {GROUPS.map((item) => {
+          {crisisTabs.map((item) => {
             const active = item.id === activeGroup;
             return (
               <button
@@ -327,7 +371,7 @@ export default function Volunteers() {
             }}
           >
             <div style={{ fontWeight: 800, fontSize: 38 / 2, color: "#131313", lineHeight: 1.2 }}>
-              {group.title}
+              {group?.title || "No active crisis"}
             </div>
             <div
               style={{
@@ -337,7 +381,7 @@ export default function Volunteers() {
                 fontWeight: 700,
               }}
             >
-              {group.meta}
+              {group?.meta || "No crisis metadata"}
             </div>
           </header>
 
@@ -352,6 +396,12 @@ export default function Volunteers() {
               minHeight: 0,
             }}
           >
+            {messages.length === 0 && (
+              <div style={{ color: "#6F6E78", fontSize: 14, fontWeight: 700, textAlign: "center", marginTop: 18 }}>
+                {isLoadingCrises ? "Loading crisis groups..." : (crisesError || "No messages yet for this crisis.")}
+              </div>
+            )}
+
             {messages.map((message) => {
               if (message.role === "me") {
                 const hasVoice = Boolean(message.audioUrl);
