@@ -1,6 +1,7 @@
 // Aiya — Brainy greeting + actions panel (right side of home page)
 import { useNavigate } from "react-router-dom";
 import { Camera, MessageCircle, Mic, Waves, BedDouble, Home as HomeIcon, AlertTriangle, LifeBuoy } from "lucide-react";
+import { useAuth } from "../../lib/auth";
 
 // Each quick topic opens the chat and auto-sends `prompt` to Brainy.
 const quickTopics = [
@@ -13,11 +14,13 @@ const quickTopics = [
 
 export default function BrainyPanel() {
   const navigate = useNavigate();
+  const { user } = useAuth();
+  const role = user?.role ?? "resident";
 
   return (
     <div style={{ alignSelf: "start" }}>
       <div style={{ fontSize: 15, fontWeight: 700, color: "#1a1a2e", textAlign: "right", marginBottom: 10 }}>
-        I am a: <span style={{ fontWeight: 800 }}>resident</span>
+        I am a: <span style={{ fontWeight: 800 }}>{role}</span>
       </div>
       <div style={{
         background: "#fff",

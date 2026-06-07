@@ -264,10 +264,11 @@ export default function CrisisDetail() {
   const sensors = crisis.sensors ?? {};
 
   // Brainy's LLM analysis: situation-assessment findings + AI volunteer tasks.
-  // Capped to 6 to match the backend's maxTaskFindings (taskgen.go), which limits
-  // how many findings feed task generation in the first place.
+  // The backend now emits several tasks per finding, scaled by severity
+  // (taskgen.go tasksForSeverity), so a severe crisis legitimately has more than
+  // one card. Display-capped at 12 as a defensive guard against a runaway list.
   const findings = triage?.findings ?? [];
-  const aiTasks = (triage?.tasks ?? []).slice(0, 6);
+  const aiTasks = (triage?.tasks ?? []).slice(0, 12);
 
   // The crisis row uses `description`; older mock rows used `summary`. Prefer
   // whichever is present so Brainy's Brief always has text.

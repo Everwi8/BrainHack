@@ -44,6 +44,10 @@ CREATE TABLE IF NOT EXISTS crises (
   reported_by   UUID        REFERENCES users(id),
   approved_by   UUID        REFERENCES users(id),
   ai_summary    TEXT        NOT NULL DEFAULT '',
+  -- Per-crisis live-sensor snapshot rendered by the CrisisDetail "Live data
+  -- sources" cards: { nea_rain_mm, pub_drain_pct, lta_eta_min, moh_beds_avail }.
+  -- Shape owned by the frontend; absent key → that card shows "No data".
+  sensors       JSONB       NOT NULL DEFAULT '{}'::jsonb,
   created_at    TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   updated_at    TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );

@@ -195,23 +195,23 @@ func TestSplitStations(t *testing.T) {
 	}
 }
 
-// TestAttachFindingMeta confirms generated cards inherit the crisis_id of the
-// finding they map to (index alignment), enabling real task writes.
-func TestAttachFindingMeta(t *testing.T) {
-	findings := []TriageFinding{
-		{Type: "flood", Severity: SeverityCritical, Title: "x", Location: "Pasir Ris", CrisisID: "c-flood"},
-		{Type: "haze", Severity: SeverityWarning, Title: "y", Location: "West", CrisisID: "c-haze"},
+// TestStampFinding confirms every generated card inherits its source finding's
+// crisis_id (and type/location when blank), enabling real task writes. With the
+// per-finding generation model, all cards from one finding share its crisis_id —
+// no index alignment to get wrong.
+func TestStampFinding(t *testing.T) {
+	f := TriageFinding{Type: "flood", Severity: SeverityCritical, Title: "x", Location: "Pasir Ris", CrisisID: "c-flood"}
+	cards := fallbackTaskCards(f, tasksForSeverity(f.Severity))
+	if len(cards) < 2 {
+		t.Fatalf("critical finding should yield several cards, got %d", len(cards))
 	}
-	cards := fallbackTaskCards(findings)
-	attachFindingMeta(cards, findings)
-	if cards[0].CrisisID != "c-flood" || cards[1].CrisisID != "c-haze" {
-		t.Fatalf("cards did not inherit crisis ids: %+v", cards)
-	}
-
-	// Length mismatch must leave cards untagged rather than mislabel them.
-	cards2 := []TaskCard{{Title: "only one"}}
-	attachFindingMeta(cards2, findings)
-	if cards2[0].CrisisID != "" {
-		t.Errorf("mismatched lengths should not tag cards, got %q", cards2[0].CrisisID)
+	stampFinding(cards, f)
+	for i, c := range cards {
+		if c.CrisisID != "c-flood" {
+			t.Fatalf("card %d did not inherit crisis id: %+v", i, c)
+		}
+		if c.Type != "flood" || c.Location != "Pasir Ris" {
+			t.Errorf("card %d missing type/location: %+v", i, c)
+		}
 	}
 }

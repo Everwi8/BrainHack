@@ -2,27 +2,43 @@ package lib
 
 import "testing"
 
-// TestFallbackTaskCards checks the deterministic mapping covers every finding
-// and maps severity to priority/headcount sensibly (no LLM involved).
+// TestFallbackTaskCards checks the deterministic path produces several DISTINCT
+// cards per finding, scaled by severity, mapping severity to priority/headcount
+// sensibly (no LLM involved).
 func TestFallbackTaskCards(t *testing.T) {
-	findings := []TriageFinding{
-		{Type: "flood", Severity: SeverityCritical, Title: "Flash flood: X", Detail: "details", Location: "X"},
-		{Type: "haze", Severity: SeverityWarning, Title: "Haze: West", Detail: "details", Location: "West"},
-		{Type: "dengue", Severity: SeverityLow, Title: "Dengue: Y", Detail: "details", Location: "Y"},
+	// Critical → several cards, all high priority / 4 volunteers, distinct titles.
+	crit := TriageFinding{Type: "flood", Severity: SeverityCritical, Title: "Flash flood: X", Detail: "details", Location: "X"}
+	cards := fallbackTaskCards(crit, tasksForSeverity(crit.Severity))
+	if len(cards) != 4 {
+		t.Fatalf("critical → expected 4 cards, got %d", len(cards))
+	}
+	seen := map[string]bool{}
+	for _, c := range cards {
+		if c.Priority != "high" || c.VolunteersNeeded != 4 {
+			t.Errorf("critical card → priority %q / %d volunteers", c.Priority, c.VolunteersNeeded)
+		}
+		if seen[c.Title] {
+			t.Errorf("duplicate card title %q", c.Title)
+		}
+		seen[c.Title] = true
 	}
 
-	cards := fallbackTaskCards(findings)
-	if len(cards) != len(findings) {
-		t.Fatalf("expected %d cards, got %d", len(findings), len(cards))
+	// Lower severity → fewer cards.
+	low := TriageFinding{Type: "dengue", Severity: SeverityLow, Title: "Dengue: Y", Detail: "details", Location: "Y"}
+	lc := fallbackTaskCards(low, tasksForSeverity(low.Severity))
+	if len(lc) != 2 {
+		t.Fatalf("low → expected 2 cards, got %d", len(lc))
 	}
-	if cards[0].Priority != "high" || cards[0].VolunteersNeeded != 4 {
-		t.Errorf("critical finding → got priority %q / %d volunteers", cards[0].Priority, cards[0].VolunteersNeeded)
+	if lc[0].Priority != "low" || lc[0].VolunteersNeeded != 1 {
+		t.Errorf("low finding → got priority %q / %d volunteers", lc[0].Priority, lc[0].VolunteersNeeded)
 	}
-	if cards[1].Priority != "medium" {
-		t.Errorf("warning finding → got priority %q", cards[1].Priority)
-	}
-	if cards[2].Priority != "low" || cards[2].VolunteersNeeded != 1 {
-		t.Errorf("low finding → got priority %q / %d volunteers", cards[2].Priority, cards[2].VolunteersNeeded)
+
+	// Requested count is capped by the available template bank (unknown type has
+	// just the finding's own wording).
+	unk := TriageFinding{Type: "other", Severity: SeverityCritical, Title: "t", Detail: "dd"}
+	uc := fallbackTaskCards(unk, tasksForSeverity(unk.Severity))
+	if len(uc) != 1 {
+		t.Fatalf("unknown type → expected 1 card, got %d", len(uc))
 	}
 }
 

@@ -30,6 +30,11 @@ type Crisis struct {
 	ReportedBy   *string   `json:"reported_by,omitempty"`
 	ApprovedBy   *string   `json:"approved_by,omitempty"`
 	AISummary    string    `json:"ai_summary,omitempty"`
+	// Sensors is a jsonb passthrough of the per-crisis live-sensor snapshot the
+	// CrisisDetail "Live data sources" cards render (nea_rain_mm, pub_drain_pct,
+	// lta_eta_min, moh_beds_avail). Raw so we don't pin a schema here; omitempty
+	// so rows without a snapshot serialise as no field (cards show "No data").
+	Sensors      json.RawMessage `json:"sensors,omitempty"`
 	CreatedAt    time.Time `json:"created_at,omitempty"`
 	UpdatedAt    time.Time `json:"updated_at,omitempty"`
 }

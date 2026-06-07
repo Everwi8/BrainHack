@@ -21,27 +21,37 @@
 -- Optional clean slate for crises (removes live-ingestion rows too):
 -- DELETE FROM crises WHERE external_id LIKE 'nea:%' OR external_id LIKE 'lta:%' OR external_id LIKE 'pub:%';
 
-INSERT INTO crises (id, title, description, type, severity, status, lat, lng, location_name, source) VALUES
+-- The `sensors` jsonb (migration 004 / schema.sql) feeds the CrisisDetail
+-- "Live data sources" cards. Keys present render a value + status; omitted keys
+-- show "No data" / "Normal". Values are themed per crisis and tuned to the card
+-- thresholds (rain >60 ALERT / >40 WARN; drain >80 ALERT / >60 WARN).
+INSERT INTO crises (id, title, description, type, severity, status, lat, lng, location_name, source, sensors) VALUES
   (
     '11111111-0000-0000-0000-000000000001',
     'Flash Flood — Kranji',
     'Water levels rising rapidly near Kranji MRT. Low-lying areas affected.',
     'flood', 'high', 'active',
-    1.4255, 103.7576, 'Kranji', 'pub'
+    1.4255, 103.7576, 'Kranji', 'pub',
+    -- Flood: heavy rain + drains near capacity, nearby beds drawn down.
+    '{"nea_rain_mm": 72, "pub_drain_pct": 88, "moh_beds_avail": 24}'::jsonb
   ),
   (
     '11111111-0000-0000-0000-000000000002',
     'EWL Disruption — Jurong East to Clementi',
     'Train service disrupted between Jurong East and Clementi due to a track fault.',
     'mrt', 'medium', 'active',
-    1.3329, 103.7436, 'Jurong East', 'lta'
+    1.3329, 103.7436, 'Jurong East', 'lta',
+    -- MRT fault: dry weather, transit ETA elevated (WATCH).
+    '{"nea_rain_mm": 6, "pub_drain_pct": 22, "lta_eta_min": 18, "moh_beds_avail": 41}'::jsonb
   ),
   (
     '11111111-0000-0000-0000-000000000003',
     'Haze Alert — Central Region',
     'PSI reading at 142. Unhealthy for sensitive groups.',
     'haze', 'medium', 'active',
-    1.3521, 103.8198, 'Central Singapore', 'nea'
+    1.3521, 103.8198, 'Central Singapore', 'nea',
+    -- Haze: clear/dry, transit normal, beds steady.
+    '{"nea_rain_mm": 2, "pub_drain_pct": 16, "moh_beds_avail": 33}'::jsonb
   )
 ON CONFLICT (id) DO UPDATE SET
   title         = EXCLUDED.title,
@@ -52,4 +62,5 @@ ON CONFLICT (id) DO UPDATE SET
   lat           = EXCLUDED.lat,
   lng           = EXCLUDED.lng,
   location_name = EXCLUDED.location_name,
-  source        = EXCLUDED.source;
+  source        = EXCLUDED.source,
+  sensors       = EXCLUDED.sensors;
