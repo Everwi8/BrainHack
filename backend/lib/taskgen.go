@@ -4,8 +4,7 @@
 // mapping guarantees the demo never shows an empty task list.
 //
 // Findings are deduplicated by location and capped before generation so the
-// same spot doesn't spawn near-duplicate cards and the LLM response stays small
-// (the free model is slow on long outputs).
+// same spot doesn't spawn near-duplicate cards and the LLM response stays small.
 //
 // Generated cards land in Sanjey's tasks store via lib.DB (the same store behind
 // POST /api/tasks). A task row needs a real crisis_id FK, so ForwardTasks only

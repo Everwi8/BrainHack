@@ -1,4 +1,5 @@
-// Perrin — OpenAI-compatible LLM client (gpt-oss-120b via configurable base URL)
+// Perrin — OpenAI LLM client (gpt-4.1-mini for both text and vision, via a
+// configurable OpenAI-compatible base URL).
 package lib
 
 import (
@@ -15,9 +16,8 @@ import (
 )
 
 const (
-	defaultModel       = "nvidia/nemotron-3-super-120b-a12b:free"
-	defaultVisionModel = "nvidia/nemotron-nano-12b-v2-vl:free"
-	defaultBaseURL     = "https://openrouter.ai/api/v1"
+	defaultModel   = "gpt-4.1-mini"
+	defaultBaseURL = "https://api.openai.com/v1"
 
 	brainySystem = `You are Brainy, Singapore's AI crisis-response co-pilot — a calm, warm, and reliable assistant during emergencies.
 
@@ -49,28 +49,10 @@ type Message struct {
 // ample room for Brainy's short replies and the task JSON envelope.
 const maxTokens = 2048
 
-// reasoningParam toggles a model's chain-of-thought via OpenRouter's unified
-// reasoning control. Nemotron is a reasoning model, so this is set per call
-// rather than globally:
-//   - ON for the text-model answer paths (plain chat, the photo→answer step),
-//     where the 120B's deliberation improves SG-local advice.
-//   - OFF for structured JSON (ChatJSON) and the small vision model, where
-//     reasoning streams into the content field — blowing past max_tokens before
-//     any JSON appears and making the generation slow enough to time out.
-type reasoningParam struct {
-	Enabled bool `json:"enabled"`
-}
-
-var (
-	reasoningOff = reasoningParam{Enabled: false}
-	reasoningOn  = reasoningParam{Enabled: true}
-)
-
 type llmRequest struct {
-	Model     string         `json:"model"`
-	Messages  []Message      `json:"messages"`
-	MaxTokens int            `json:"max_tokens"`
-	Reasoning reasoningParam `json:"reasoning"`
+	Model     string    `json:"model"`
+	Messages  []Message `json:"messages"`
+	MaxTokens int       `json:"max_tokens"`
 }
 
 type llmResponse struct {
@@ -133,8 +115,7 @@ const (
 )
 
 // requestTimeout is the per-attempt HTTP timeout, overridable via
-// LLM_TIMEOUT_SECONDS. Task generation on the slow free model can need a longer
-// budget than chat, so the demo can raise this without touching code.
+// LLM_TIMEOUT_SECONDS so the demo can raise it without touching code.
 func requestTimeout() time.Duration {
 	if v := os.Getenv("LLM_TIMEOUT_SECONDS"); v != "" {
 		if n, err := strconv.Atoi(v); err == nil && n > 0 {
@@ -145,13 +126,12 @@ func requestTimeout() time.Duration {
 }
 
 // chatCompletion is the shared text core: it POSTs the given messages to the
-// chat-completions endpoint and returns the assistant reply text. The reasoning
-// flag is set per call (on for answers, off for structured JSON). Transient
+// chat-completions endpoint and returns the assistant reply text. Transient
 // failures (network errors, HTTP 429, and 5xx) are retried up to maxRetries
 // times with exponential backoff.
-func chatCompletion(messages []Message, reasoning reasoningParam) (string, error) {
+func chatCompletion(messages []Message) (string, error) {
 	_, baseURL, model := llmConfig()
-	payload, err := json.Marshal(llmRequest{Model: model, Messages: messages, MaxTokens: maxTokens, Reasoning: reasoning})
+	payload, err := json.Marshal(llmRequest{Model: model, Messages: messages, MaxTokens: maxTokens})
 	if err != nil {
 		return "", fmt.Errorf("LLM marshal error: %w", err)
 	}
@@ -179,8 +159,6 @@ func postCompletion(baseURL string, payload []byte) (string, error) {
 		}
 		req.Header.Set("Content-Type", "application/json")
 		req.Header.Set("Authorization", "Bearer "+apiKey)
-		req.Header.Set("HTTP-Referer", "https://brainysg.app")
-		req.Header.Set("X-Title", "BrainySG")
 
 		resp, err := client.Do(req)
 		if err != nil {
@@ -229,7 +207,7 @@ func postCompletion(baseURL string, payload []byte) (string, error) {
 func ChatTurn(turns []Message, userMessage string) (reply string, updated []Message, err error) {
 	turns = append(turns, Message{Role: "user", Content: userMessage})
 
-	reply, err = chatCompletion(assemblePrompt(turns), reasoningOn)
+	reply, err = chatCompletion(assemblePrompt(turns))
 	if err != nil {
 		return "", nil, err
 	}
@@ -238,25 +216,18 @@ func ChatTurn(turns []Message, userMessage string) (reply string, updated []Mess
 	return reply, trimTurns(turns), nil
 }
 
-// noThinkDirective disables chain-of-thought on NVIDIA Nemotron models, which
-// otherwise stream their entire reasoning into the content field — that both
-// blows past the token cap before any JSON appears and makes the call very
-// slow. It is the documented Nemotron control token; harmless to other models.
-const noThinkDirective = "detailed thinking off"
-
 // ChatJSON sends a system instruction and user prompt expecting a JSON reply
 // and unmarshals it into target (a pointer). It is stateless — it does not
 // touch session history — and is the shared helper for triage and task-card
-// generation. Reasoning is disabled (Nemotron streams its thinking into the
-// content otherwise), and the JSON payload is extracted even if the model wraps
-// it in code fences or surrounding prose.
+// generation. The JSON payload is extracted even if the model wraps it in code
+// fences or surrounding prose.
 func ChatJSON(systemPrompt, userPrompt string, target any) error {
 	messages := []Message{
-		{Role: "system", Content: noThinkDirective + "\n\n" + systemPrompt},
+		{Role: "system", Content: systemPrompt},
 		{Role: "user", Content: userPrompt},
 	}
 
-	reply, err := chatCompletion(messages, reasoningOff)
+	reply, err := chatCompletion(messages)
 	if err != nil {
 		return err
 	}
@@ -329,7 +300,6 @@ type visionRequest struct {
 	Model     string          `json:"model"`
 	Messages  []visionMessage `json:"messages"`
 	MaxTokens int             `json:"max_tokens"`
-	Reasoning reasoningParam  `json:"reasoning"`
 }
 
 // PhotoObservation is the structured read of a photo produced by the vision
@@ -345,9 +315,9 @@ type PhotoObservation struct {
 }
 
 // visionExtractSystem instructs the vision model to return only structured
-// facts — no prose, no invented specifics. Keeping it to observable facts is
-// what stops the 12B model from hallucinating addresses/dates the way it does
-// when asked to write the full answer directly.
+// facts — no prose, no invented specifics. Constraining it to observable facts
+// keeps the model from hallucinating addresses/dates the way it can when asked
+// to write the full answer directly.
 const visionExtractSystem = `You are a vision analysis system for Singapore emergency response. Look at the photo and return ONLY a JSON object (no prose, no markdown fences) with exactly this shape:
 {
   "crisis_type": "<one of: flood, fire, haze, fallen_tree, road_accident, building_damage, medical, crowd, none, other>",
@@ -363,17 +333,12 @@ Report ONLY what is visibly present. Do NOT invent or guess locations, place nam
 // the user still gets a useful answer (degrades to the old direct-vision path).
 const visionProseFallback = `Analyse the attached photo of a possible emergency in Singapore. Describe only what is visibly present (do not invent locations, names, or dates), identify the crisis type and severity, and give immediate safety actions. For life-threatening situations lead with calling 995 (SCDF) or 999 (Police).`
 
-// callVisionModel posts a single image + text prompt to the vision model and
-// returns the raw reply text, sharing the retry transport.
+// callVisionModel posts a single image + text prompt to the multimodal model
+// and returns the raw reply text, sharing the retry transport. It uses the same
+// model as the text path (gpt-4.1-mini is multimodal) — only the request shape
+// differs, since vision needs an image_url content part.
 func callVisionModel(systemPrompt, userPrompt, imageDataURL string) (string, error) {
-	baseURL := os.Getenv("LLM_BASE_URL")
-	if baseURL == "" {
-		baseURL = defaultBaseURL
-	}
-	model := os.Getenv("LLM_VISION_MODEL")
-	if model == "" {
-		model = defaultVisionModel
-	}
+	_, baseURL, model := llmConfig()
 
 	messages := []visionMessage{
 		{Role: "system", Content: []contentPart{{Type: "text", Text: systemPrompt}}},
@@ -383,7 +348,7 @@ func callVisionModel(systemPrompt, userPrompt, imageDataURL string) (string, err
 		}},
 	}
 
-	payload, err := json.Marshal(visionRequest{Model: model, Messages: messages, MaxTokens: maxTokens, Reasoning: reasoningOff})
+	payload, err := json.Marshal(visionRequest{Model: model, Messages: messages, MaxTokens: maxTokens})
 	if err != nil {
 		return "", fmt.Errorf("LLM marshal error: %w", err)
 	}
@@ -410,9 +375,9 @@ func ExtractPhotoObservation(caption, imageDataURL string) (PhotoObservation, er
 	return obs, nil
 }
 
-// VisionTurn is the stateless hybrid photo pipeline: the vision model extracts
-// a structured observation, then the stronger text model turns that (plus the
-// prior turns and persona) into Brainy's answer. It returns the reply, the
+// VisionTurn is the stateless hybrid photo pipeline: the model first extracts a
+// structured observation from the image, then turns that (plus the prior turns
+// and persona) into Brainy's answer in a text call. It returns the reply, the
 // parsed observation (nil on the prose fallback), and the updated turns for the
 // caller to persist.
 //
@@ -467,7 +432,7 @@ func VisionTurn(turns []Message, caption, imageDataURL, imageURL string) (reply 
 	b.WriteString("\nRespond to the user about this photo: briefly describe the situation based only on these findings (do not invent details), then give the most important safety actions.")
 
 	promptTurns := append(append([]Message{}, turns...), Message{Role: "user", Content: b.String()})
-	reply, err = chatCompletion(assemblePrompt(promptTurns), reasoningOn)
+	reply, err = chatCompletion(assemblePrompt(promptTurns))
 	if err != nil {
 		return "", nil, nil, err
 	}
