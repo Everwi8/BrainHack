@@ -157,7 +157,7 @@ function SensorCard({ icon, label, value, status, pct }) {
 // its group chat. A task already joined shows an "Open chat" affordance, and a
 // one-task-per-crisis conflict offers leave-and-switch.
 function AiTaskCard({
-  task, joined, confirming, joining, error,
+  task, joined, confirming, joining, error, recommended,
   onRequestConfirm, onCancel, onConfirm, onOpenChat, onLeaveAndJoin,
 }) {
   const p = PRIORITY[task.priority] ?? PRIORITY.medium;
@@ -165,20 +165,46 @@ function AiTaskCard({
   // Remaining volunteer slots; 0 (omitted by the API) means the task is full.
   const remaining = task.volunteers_needed ?? 0;
   const full = remaining <= 0;
+  const skills = Array.isArray(task.skills_needed) ? task.skills_needed : [];
+  const highlight = recommended && !joined;
   return (
     <div
       style={{
-        background: joined ? "#F0FDF4" : "#FBFAF7",
-        border: `1px solid ${joined ? "#BBF7D0" : "#ECE6DA"}`, borderRadius: 12,
+        background: joined ? "#F0FDF4" : highlight ? "#FAF5FF" : "#FBFAF7",
+        border: `1px solid ${joined ? "#BBF7D0" : highlight ? "#C4B5FD" : "#ECE6DA"}`,
+        boxShadow: highlight ? "0 0 0 3px rgba(124,58,237,0.12)" : "none",
+        borderRadius: 12,
         padding: "12px 14px", display: "flex", flexDirection: "column", gap: 7,
         transition: "border-color 150ms, box-shadow 150ms, background 150ms",
       }}
     >
+      {highlight && (
+        <div style={{
+          display: "inline-flex", alignItems: "center", gap: 5, alignSelf: "flex-start",
+          background: "#EDE9FE", color: "#6D28D9", borderRadius: 999, padding: "3px 10px",
+          fontSize: 11, fontWeight: 800,
+        }}>
+          <Sparkles size={11} /> Brainy recommends this for you
+        </div>
+      )}
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10 }}>
         <span style={{ fontWeight: 800, fontSize: 14, color: INK }}>{task.title}</span>
         <Badge color={p.color} bg={p.bg}>{p.label}</Badge>
       </div>
       {task.description && <span style={{ fontSize: 12.5, color: "#6B6B6B" }}>{task.description}</span>}
+
+      {skills.length > 0 && (
+        <div style={{ display: "flex", flexWrap: "wrap", gap: 5 }}>
+          {skills.map((s) => (
+            <span key={s} style={{
+              fontSize: 10.5, fontWeight: 700, color: "#6D28D9", background: "#F3E8FF",
+              borderRadius: 999, padding: "2px 8px", textTransform: "capitalize",
+            }}>
+              {s.replace(/_/g, " ")}
+            </span>
+          ))}
+        </div>
+      )}
 
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, marginTop: 2 }}>
         <span style={{ display: "inline-flex", alignItems: "center", gap: 4, fontSize: 11.5, fontWeight: 700, color: full && !joined ? "#9CA3AF" : "#16A34A" }}>
@@ -250,6 +276,69 @@ function ghostBtn() {
   };
 }
 
+// ─── Skills profile modal ──────────────────────────────────────────────────────
+// One-time skill capture for the "find my match" flow. Presents the catalogue as
+// toggleable chips and saves the selection before matching runs.
+function SkillsModal({ catalog, initial, saving, onSave, onClose }) {
+  const [selected, setSelected] = useState(() => new Set(initial || []));
+  const toggle = (slug) => setSelected((prev) => {
+    const next = new Set(prev);
+    next.has(slug) ? next.delete(slug) : next.add(slug);
+    return next;
+  });
+  return (
+    <div
+      onClick={onClose}
+      style={{
+        position: "fixed", inset: 0, background: "rgba(0,0,0,0.45)", zIndex: 1000,
+        display: "flex", alignItems: "center", justifyContent: "center", padding: 16,
+      }}
+    >
+      <div
+        onClick={(e) => e.stopPropagation()}
+        style={{
+          background: "#FFFDF8", borderRadius: 16, padding: "22px 22px 18px", maxWidth: 440, width: "100%",
+          boxShadow: "0 20px 50px rgba(0,0,0,0.25)", border: "1px solid #ECE6DA",
+        }}
+      >
+        <div style={{ display: "flex", alignItems: "center", gap: 7, marginBottom: 4 }}>
+          <Sparkles size={16} color="#7C3AED" />
+          <h3 style={{ margin: 0, fontSize: 16, fontWeight: 900, color: INK }}>What can you help with?</h3>
+        </div>
+        <p style={{ margin: "0 0 14px", fontSize: 13, color: "#6B6B6B", fontWeight: 600 }}>
+          Pick your skills so Brainy can match you to the task where you'll help most.
+        </p>
+        <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginBottom: 18 }}>
+          {catalog.map((s) => {
+            const on = selected.has(s.slug);
+            return (
+              <button
+                key={s.slug}
+                onClick={() => toggle(s.slug)}
+                style={{
+                  border: `1.5px solid ${on ? "#7C3AED" : "#E5E7EB"}`,
+                  background: on ? "#EDE9FE" : "#fff",
+                  color: on ? "#6D28D9" : "#4B5563",
+                  borderRadius: 999, padding: "7px 13px", fontSize: 12.5, fontWeight: 700,
+                  cursor: "pointer", fontFamily: "inherit",
+                }}
+              >
+                {on ? "✓ " : ""}{s.label}
+              </button>
+            );
+          })}
+        </div>
+        <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
+          <button onClick={onClose} disabled={saving} style={ghostBtn()}>Cancel</button>
+          <button onClick={() => onSave([...selected])} disabled={saving} style={ctaBtn("#7C3AED")}>
+            {saving ? "Saving…" : "Save & match me"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ─── Sensor status logic (thresholds from JeraldSession.md) ───────────────────────
 function rainStatus(mm)   { if (mm == null)  return null; return mm  > 60 ? "ALERT" : mm  > 40 ? "WARN" : "OK"; }
 function drainStatus(pct) { if (pct == null) return null; return pct > 80 ? "ALERT" : pct > 60 ? "WARN" : "OK"; }
@@ -284,6 +373,16 @@ export default function CrisisDetail() {
   const [confirmingId, setConfirmingId] = useState(null); // card showing Confirm
   const [joiningId, setJoiningId] = useState(null);       // in-flight join
   const [joinError, setJoinError] = useState(null);       // { taskId, message, currentTaskId }
+
+  // "Find my match" flow: skill profile capture + Brainy's recommendation.
+  const [skillCatalog, setSkillCatalog] = useState([]);
+  const [skillsModalOpen, setSkillsModalOpen] = useState(false);
+  const [savingSkills, setSavingSkills] = useState(false);
+  const [mySkills, setMySkills] = useState([]);
+  const [matchLoading, setMatchLoading] = useState(false);
+  const [recommendedTaskId, setRecommendedTaskId] = useState(null);
+  const [matchRationale, setMatchRationale] = useState("");
+  const [matchError, setMatchError] = useState("");
 
   // Which task (if any) the user has joined in this crisis, so the matching card
   // renders its "Joined · Open chat" state.
@@ -354,6 +453,62 @@ export default function CrisisDetail() {
       openTaskChat(taskId);
     } else {
       setJoinError({ taskId, message: body.error || "Could not switch tasks." });
+    }
+  };
+
+  // ── "Find my match": ensure a skills profile, then rank this crisis's tasks ──
+  const ensureSkillCatalog = async () => {
+    if (skillCatalog.length) return;
+    try {
+      const res = await api.get("/api/volunteers/skills");
+      setSkillCatalog(Array.isArray(res?.skills) ? res.skills : []);
+    } catch { /* non-fatal — the modal just shows no chips */ }
+  };
+
+  const runMatch = async () => {
+    setMatchLoading(true);
+    setMatchError("");
+    try {
+      const res = await api.get(`/api/crises/${id}/match`);
+      setRecommendedTaskId(res?.recommended_task_id || null);
+      setMatchRationale(res?.rationale || "");
+      tasksRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+    } catch (err) {
+      setMatchError(err?.message || "Could not find a match.");
+    } finally {
+      setMatchLoading(false);
+    }
+  };
+
+  // Tap "Find my match": if the user has no skills profile yet, prompt the form;
+  // otherwise go straight to ranking the tasks for them.
+  const findMyMatch = async () => {
+    setMatchError("");
+    try {
+      const profile = await api.get("/api/volunteers/me");
+      setMySkills(Array.isArray(profile?.skills) ? profile.skills : []);
+      if (!profile?.configured) {
+        await ensureSkillCatalog();
+        setSkillsModalOpen(true);
+        return;
+      }
+      await runMatch();
+    } catch (err) {
+      setMatchError(err?.message || "Could not start matching.");
+    }
+  };
+
+  const saveSkillsAndMatch = async (skills) => {
+    setSavingSkills(true);
+    try {
+      await api.post("/api/volunteers", { skills });
+      setMySkills(skills);
+      setSkillsModalOpen(false);
+      await runMatch();
+    } catch (err) {
+      setMatchError(err?.message || "Could not save your skills.");
+    } finally {
+      setSavingSkills(false);
     }
   };
 
@@ -603,6 +758,34 @@ export default function CrisisDetail() {
                 </div>
               </div>
 
+              {/* Find-my-match CTA + Brainy's recommendation (hidden once joined) */}
+              {!triageLoading && aiTasks.length > 0 && !myTaskId && (
+                <div style={{ marginBottom: 14 }}>
+                  <button onClick={findMyMatch} disabled={matchLoading} style={{
+                    display: "inline-flex", alignItems: "center", gap: 7,
+                    background: "#7C3AED", color: "#fff", border: "none", borderRadius: 10,
+                    padding: "9px 16px", fontSize: 13, fontWeight: 800,
+                    cursor: matchLoading ? "wait" : "pointer", fontFamily: "inherit",
+                  }}>
+                    <Sparkles size={14} /> {matchLoading ? "Brainy is matching you…" : "I want to help — find my match"}
+                  </button>
+                  {matchError && (
+                    <div style={{ marginTop: 8, fontSize: 12.5, color: "#B91C1C", fontWeight: 600 }}>{matchError}</div>
+                  )}
+                  {recommendedTaskId && matchRationale && (
+                    <div style={{
+                      marginTop: 10, background: "#F5F3FF", border: "1px solid #DDD6FE", borderRadius: 12,
+                      padding: "11px 13px", display: "flex", gap: 9, alignItems: "flex-start",
+                    }}>
+                      <Sparkles size={15} color="#7C3AED" style={{ flexShrink: 0, marginTop: 1 }} />
+                      <span style={{ fontSize: 12.5, color: "#5B21B6", fontWeight: 600, lineHeight: 1.4 }}>
+                        <strong>Brainy:</strong> {matchRationale}
+                      </span>
+                    </div>
+                  )}
+                </div>
+              )}
+
               {/* Task list */}
               <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
                 {triageLoading ? (
@@ -620,6 +803,7 @@ export default function CrisisDetail() {
                       <AiTaskCard
                         key={taskId ?? i}
                         task={t}
+                        recommended={!!taskId && recommendedTaskId === taskId}
                         joined={!!taskId && myTaskId === taskId}
                         confirming={confirmingId === taskId}
                         joining={joiningId === taskId}
@@ -760,6 +944,17 @@ export default function CrisisDetail() {
 
       {/* Slide-in Brainy chat drawer (sits above everything via fixed positioning) */}
       <BrainyDrawer open={chatOpen} onClose={() => setChatOpen(false)} crisis={crisis} />
+
+      {/* Skills capture for the "find my match" flow */}
+      {skillsModalOpen && (
+        <SkillsModal
+          catalog={skillCatalog}
+          initial={mySkills}
+          saving={savingSkills}
+          onSave={saveSkillsAndMatch}
+          onClose={() => setSkillsModalOpen(false)}
+        />
+      )}
     </div>
   );
 }

@@ -86,6 +86,7 @@ func CrisisTriage(c *gin.Context) {
 			Status:           "pending",
 			Priority:         card.Priority,
 			VolunteersNeeded: card.VolunteersNeeded,
+			SkillsNeeded:     card.SkillsNeeded,
 		})
 		if err != nil {
 			log.Printf("[crisis-triage] persist task %q for crisis %s: %v", card.Title, id, err)

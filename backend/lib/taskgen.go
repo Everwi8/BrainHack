@@ -28,13 +28,14 @@ const maxTaskFindings = 6
 // required fields (title, description, priority, volunteers_needed, crisis_id)
 // match plan.md; type/location are extra context for the map and group chat.
 type TaskCard struct {
-	Title            string `json:"title"`
-	Description      string `json:"description"`
-	Priority         string `json:"priority"` // high, medium, low
-	VolunteersNeeded int    `json:"volunteers_needed"`
-	CrisisID         string `json:"crisis_id,omitempty"`
-	Type             string `json:"type,omitempty"` // mirrors the finding type
-	Location         string `json:"location,omitempty"`
+	Title            string   `json:"title"`
+	Description      string   `json:"description"`
+	Priority         string   `json:"priority"` // high, medium, low
+	VolunteersNeeded int      `json:"volunteers_needed"`
+	SkillsNeeded     []string `json:"skills_needed,omitempty"` // catalogue slugs for matching
+	CrisisID         string   `json:"crisis_id,omitempty"`
+	Type             string   `json:"type,omitempty"` // mirrors the finding type
+	Location         string   `json:"location,omitempty"`
 }
 
 // taskGenSystem instructs the model to convert findings into ready-to-assign
@@ -45,12 +46,13 @@ const taskGenSystem = `You are the task-planning module for BrainySG, Singapore'
 Return ONLY a JSON object (no prose, no markdown fences) of this exact shape:
 {
   "tasks": [
-    {"title": "<imperative, max 8 words>", "description": "<ONE sentence: what the volunteer does + a safety note>", "priority": "<high|medium|low>", "volunteers_needed": <integer 1-10>, "type": "<crisis type>", "location": "<affected location>"}
+    {"title": "<imperative, max 8 words>", "description": "<ONE sentence: what the volunteer does + a safety note>", "priority": "<high|medium|low>", "volunteers_needed": <integer 1-10>, "skills_needed": ["<0-3 skill slugs>"], "type": "<crisis type>", "location": "<affected location>"}
   ]
 }
 
 Rules:
 - You are given ONE situation and a target number of tasks. Generate close to that many DISTINCT, non-overlapping volunteer tasks for it — each a different concrete action (e.g. for a flood: guide residents to higher ground, stage sandbags, check on elderly, set up safe-route wayfinding). More severe situations warrant more tasks.
+- "skills_needed": choose 0-3 of these exact slugs that the task genuinely calls for: medical, first_aid, driving, heavy_lifting, languages, elderly_care, childcare, cooking, logistics, tech. Use [] if the task needs no special skill. Do NOT invent other skill names.
 - Do NOT merge, add, or invent other situations, locations, names, or numbers beyond the one given.
 - Critical situations get "high" priority; warnings "medium"; low "low".
 - Tasks must be practical community actions. Do NOT invent emergency-services work (firefighting, rescue) — those go to 995.`
@@ -178,6 +180,7 @@ func sanitiseTaskCards(cards []TaskCard) []TaskCard {
 			continue
 		}
 		t.Priority = normalisePriority(t.Priority)
+		t.SkillsNeeded = NormaliseSkills(t.SkillsNeeded)
 		if t.VolunteersNeeded < 1 {
 			t.VolunteersNeeded = 1
 		}
@@ -214,6 +217,7 @@ func fallbackTaskCards(f TriageFinding, n int) []TaskCard {
 	if n > len(templates) {
 		n = len(templates)
 	}
+	skills := fallbackSkillsFor(f)
 	out := make([]TaskCard, 0, n)
 	for _, tpl := range templates[:n] {
 		out = append(out, TaskCard{
@@ -221,11 +225,28 @@ func fallbackTaskCards(f TriageFinding, n int) []TaskCard {
 			Description:      tpl[1],
 			Priority:         priorityForSeverity(f.Severity),
 			VolunteersNeeded: volunteersForSeverity(f.Severity),
+			SkillsNeeded:     skills,
 			Type:             f.Type,
 			Location:         f.Location,
 		})
 	}
 	return out
+}
+
+// fallbackSkillsFor returns a light default skill set per crisis type so the
+// offline task cards still carry matchable skills. The LLM path produces
+// per-task skills; this is only the deterministic fallback.
+func fallbackSkillsFor(f TriageFinding) []string {
+	switch f.Type {
+	case "flood":
+		return []string{"heavy_lifting"}
+	case "haze":
+		return []string{"elderly_care", "first_aid"}
+	case "transport":
+		return []string{"languages"}
+	default:
+		return []string{}
+	}
 }
 
 // taskTemplatesFor returns a bank of distinct {title, description} actions for a

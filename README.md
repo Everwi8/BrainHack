@@ -21,7 +21,7 @@ See [`architecture.md`](architecture.md) for a system diagram.
 | Backend | Go + Gin |
 | Database / Storage | Supabase (PostgreSQL + Storage) |
 | Auth | JWT issued by the backend, role-based (resident / volunteer / coordinator) |
-| LLM | OpenAI `gpt-4.1-mini` — single multimodal model for text **and** vision |
+| LLM | OpenAI — `gpt-4.1-mini` (multimodal) for chat + vision + situation assessments; `gpt-5.4-mini` (reasoning) for triage / task-card JSON |
 | Speech-to-text | OpenAI `whisper-1` |
 | Live data | NEA (weather, haze, dengue), LTA DataMall (MRT alerts), PUB (flood sensors) |
 
@@ -85,9 +85,11 @@ Copy `backend/.env.example` to `backend/.env`:
 | `SUPABASE_PUBLISHABLE_KEY` | Public (anon) key |
 | `SUPABASE_SECRET_KEY` | Server-side service key — keep secret |
 | `JWT_SECRET` | Any long random string |
-| `LLM_API_KEY` / `LLM_BASE_URL` / `LLM_MODEL` | OpenAI chat-completions; defaults `gpt-4.1-mini` |
+| `LLM_API_KEY` / `LLM_BASE_URL` / `LLM_MODEL` | OpenAI chat-completions for chat + vision; defaults `gpt-4.1-mini` |
+| `LLM_JSON_MODEL` / `LLM_JSON_REASONING_EFFORT` | Model + reasoning effort for the structured-output path (triage + task cards); blank reuses `LLM_MODEL`. Defaults `gpt-5.4-mini` / `low`. GPT-5/o-series models use `max_completion_tokens` automatically |
 | `STT_API_KEY` / `STT_BASE_URL` / `STT_MODEL` | Whisper-compatible STT; defaults `whisper-1` |
 | `LTA_API_KEY` | LTA DataMall (free at datamall.lta.gov.sg); blank skips MRT ingestion |
+| `ONEMAP_EMAIL` / `ONEMAP_PASSWORD` | OneMap account (free at onemap.gov.sg) for precise reverse-geocoding in chat personalisation; blank falls back to coarse region labels |
 
 Frontend (`frontend/.env.example` → `frontend/.env`):
 
@@ -163,6 +165,16 @@ frontend/src/
 - Backend default port is **8080** (Go/Gin, not Express).
 - Protected routes use `middleware.RequireAuth()`; coordinator-only routes add
   `middleware.RequireRole("coordinator")`.
-- The LLM layer (`lib/llm.go`) is one multimodal client for chat, photo triage,
-  and task generation; `lib/stt.go` handles voice → text via Whisper.
+- The LLM layer (`lib/llm.go`) routes by task: chat, photo triage, and the
+  AI-written situation assessment run on the multimodal chat model
+  (`gpt-4.1-mini`); the structured-output path — triage findings → task-card JSON
+  (`ChatJSON`) — runs on a reasoning model (`gpt-5.4-mini`, low effort) for
+  sharper judgment. `lib/stt.go` handles voice → text via Whisper.
+- Situation assessments are LLM-generated, not templates: the rule engine
+  produces terse findings, then `lib/triage_prose.go` expands each into a
+  resident-facing paragraph, cached by finding identity and falling back to the
+  template on any LLM error.
+- Volunteer slots are finite: joining a task decrements its `volunteers_needed`,
+  leaving restores it, and at 0 the card shows "Fully staffed" and blocks new
+  joins (coordinators are exempt — they oversee rather than fill a slot).
 - Icons come from [`lucide-react`](https://lucide.dev) — already installed.

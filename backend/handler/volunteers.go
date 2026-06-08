@@ -13,8 +13,78 @@ import (
 
 const maxVoiceBytes = 12 << 20 // 12 MB
 
-func ListVolunteers(c *gin.Context)    {}
-func RegisterVolunteer(c *gin.Context) {}
+func ListVolunteers(c *gin.Context) {}
+
+// SkillCatalog returns the canonical skill options for the volunteer profile
+// form (slug + display label). Public — the form needs it before login completes.
+func SkillCatalog(c *gin.Context) {
+	c.JSON(http.StatusOK, gin.H{"skills": lib.VolunteerSkillCatalog})
+}
+
+type volunteerProfileReq struct {
+	Skills    []string `json:"skills"`
+	Lat       *float64 `json:"lat"`
+	Lng       *float64 `json:"lng"`
+	Available *bool    `json:"available"`
+}
+
+// GetMyVolunteer returns the caller's volunteer profile (skills, availability,
+// location). `configured` is false until they've saved at least one skill, which
+// the "find my match" flow uses to decide whether to prompt the skills form.
+func GetMyVolunteer(c *gin.Context) {
+	userID := c.GetString("userID")
+	if userID == "" {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "missing user identity"})
+		return
+	}
+	v, err := lib.DB.GetVolunteerByUser(userID)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "could not fetch profile"})
+		return
+	}
+	if v == nil {
+		c.JSON(http.StatusOK, gin.H{"skills": []string{}, "available": true, "configured": false})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{
+		"skills":     v.Skills,
+		"available":  v.Available,
+		"lat":        v.Lat,
+		"lng":        v.Lng,
+		"configured": len(v.Skills) > 0,
+	})
+}
+
+// RegisterVolunteer creates or updates the caller's volunteer profile (skills +
+// optional location/availability) — the data the match flow scores tasks against.
+func RegisterVolunteer(c *gin.Context) {
+	userID := c.GetString("userID")
+	if userID == "" {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "missing user identity"})
+		return
+	}
+	var req volunteerProfileReq
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	available := true
+	if req.Available != nil {
+		available = *req.Available
+	}
+	v, err := lib.DB.UpsertVolunteer(lib.Volunteer{
+		UserID:    userID,
+		Skills:    lib.NormaliseSkills(req.Skills),
+		Lat:       req.Lat,
+		Lng:       req.Lng,
+		Available: available,
+	})
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "could not save profile"})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"skills": v.Skills, "available": v.Available, "configured": len(v.Skills) > 0})
+}
 
 func Voice(c *gin.Context) {
 	fileHeader, err := c.FormFile("audio")

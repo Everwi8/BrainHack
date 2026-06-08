@@ -232,11 +232,12 @@ export default function Volunteers() {
     const senderID = msg?.sender_user_id || "";
     const senderRole = String(msg?.sender_role || "").toLowerCase();
     const isMine = Boolean(currentUserID && senderID && senderID === currentUserID);
+    const isBrainy = senderRole === "brainy" || senderRole === "assistant";
 
     return {
       id: msg?.id || `m-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
-      sender: isMine ? "Me" : (msg?.sender_name || (senderRole === "coordinator" ? "Coordinator" : "Volunteer")),
-      role: isMine ? "me" : (senderRole === "coordinator" ? "coord" : "coord"),
+      sender: isMine ? "Me" : isBrainy ? "Brainy" : (msg?.sender_name || (senderRole === "coordinator" ? "Coordinator" : "Volunteer")),
+      role: isMine ? "me" : isBrainy ? "brainy" : "coord",
       text: (msg?.message_text || msg?.transcript || "").trim(),
       messageType: msg?.message_type || "text",
       audioDuration: null,
@@ -982,7 +983,7 @@ export default function Volunteers() {
             <input
               value={draft}
               onChange={(e) => setDraft(e.target.value)}
-              placeholder="Message group..."
+              placeholder="Message group… (type @Brainy to ask)"
               onKeyDown={(e) => {
                 if (e.key === "Enter" && !e.shiftKey) {
                   e.preventDefault();

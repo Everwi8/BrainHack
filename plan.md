@@ -1,7 +1,7 @@
 # BrainySG — MVP Project Plan
 
 **Team:** came4food · DSTA BrainHack 2026 · Fast Response Track
-**Stack:** React + Vite + TailwindCSS (frontend) · Go + Gin (backend) · Supabase (PostgreSQL) · OpenAI gpt-4.1-mini (text + vision) · Whisper (STT)
+**Stack:** React + Vite + TailwindCSS (frontend) · Go + Gin (backend) · Supabase (PostgreSQL) · OpenAI gpt-4.1-mini (chat + vision) + gpt-5.4-mini (triage / task-card JSON) · Whisper (STT)
 
 ---
 
@@ -35,7 +35,7 @@ The platform does four things:
 - **Frontend:** React 18+ with Vite, TailwindCSS, React Router, PWA (service worker + manifest)
 - **Backend:** Go with Gin framework, organized under `backend/` with `handler/`, `middleware/`, `lib/`, `ingestion/`, `cache/`
 - **Database:** Supabase (PostgreSQL via PostgREST) — `lib/supabase.go`
-- **AI:** OpenAI `gpt-4.1-mini` — a single multimodal model handles chatbot, triage, photo interpretation, and task generation (text + vision); `LLM_BASE_URL=https://api.openai.com/v1`
+- **AI:** OpenAI, routed by task — `gpt-4.1-mini` (multimodal) handles chatbot, photo interpretation, and the AI-written situation assessment (text + vision); the structured-output path (triage findings → task-card JSON, via `ChatJSON`) runs on the reasoning model `gpt-5.4-mini` at low effort via `LLM_JSON_MODEL`/`LLM_JSON_REASONING_EFFORT`. `LLM_BASE_URL=https://api.openai.com/v1`
 - **Maps:** OneMap API (Singapore's national basemap, Leaflet)
 - **Real-time:** gorilla/websocket (planned for volunteer group chat)
 - **Speech-to-text:** OpenAI Whisper (`whisper-1`) — live via `POST /api/voice` (`lib.TranscribeAudio`)
@@ -265,6 +265,7 @@ The platform does four things:
 
 - [x] **LLM API Integration**
   - [x] API client wrapper at `backend/lib/llm.go` (OpenAI chat-completions; model `gpt-4.1-mini` via `LLM_MODEL`/`LLM_BASE_URL`, defaults baked in)
+  - [x] **Dual-model routing** — chat / vision / situation-prose use `LLM_MODEL` (`gpt-4.1-mini`); the structured-output path (`ChatJSON`, used by triage + task cards) uses `LLM_JSON_MODEL` (`gpt-5.4-mini`, reasoning, low effort). `buildTextRequest` emits `max_completion_tokens` + `reasoning_effort` for GPT-5/o-series models, `max_tokens` otherwise; blank `LLM_JSON_MODEL` reuses the chat model (no behaviour change)
   - [x] System prompt design for crisis chatbot persona (Brainy)
   - [x] Conversation context management — now **persisted per-user in Supabase** (`chat_sessions` JSONB), auth-gated; LLM layer is stateless
   - [x] `POST /api/chat` handler wired up (`backend/handler/chat.go`)
@@ -303,6 +304,7 @@ The platform does four things:
 - [x] Chat history storage — **persisted per-user in Supabase** `chat_sessions` (JSONB messages); sidebar UI lists past sessions and starts new chats. Run migration `db/migrations/002_chat_sessions.sql` by hand or `/api/chat` 500s.
 - [x] **Per-crisis triage endpoint** — `GET /api/crises/:id/triage` (`handler/triage.go` `CrisisTriage` → `lib.TriageForCrisis`) returns `{crisis_id, generated_at, findings, tasks}` scoped to one crisis; backs the map-click → crisis-detail flow. Empty (not an error) when nothing links to the crisis.
 - [x] **Demo data provider** — `lib/triage_demo.go` `DemoDataProvider` serves a fixed cross-agency scenario tuned to the seeded crises (`db/seeds/`), so `DATA_SOURCE=demo` fires a believable repeatable triage even when SG is calm. Toggle live↔demo at runtime via `GET/POST /api/admin/data-source` (`handler/admin.go`).
+- [x] **AI-written situation assessment** — the rule engine's terse finding `Detail` is now expanded into a 2–4 sentence resident-facing paragraph by the LLM (`lib/triage_prose.go` `EnrichFindingsProse`, chat model with the Brainy persona), cached by finding identity (`GlobalCache`) so reloads don't re-hit the model, with fallback to the template on any error. Applied only on the per-crisis view (`CrisisTriage`), scoped to that crisis's findings — the global `/api/triage` list stays terse.
 
 ### Live Data Gaps (triage now runs on live feeds only — these fields can't be sourced and are flagged here per the "no mock data" decision)
 
@@ -346,6 +348,7 @@ The platform does four things:
   - [x] Crisis metadata (type, severity, location, last updated)
   - [x] Water level / sensor reading display (if flood)
   - [x] Task card list with status badges — note: uses `urgent / open / in_progress / done` (filter tabs All/Open/In Progress/Done), **not** the documented `pending / assigned / in_progress / resolved` enum
+  - [x] **Volunteer-slot capacity** — each AI task card shows the remaining `volunteers_needed`; joining decrements it (backend `JoinTask`), leaving restores it (`LeaveTask`), and at 0 the card shows "Fully staffed" with a disabled action. Non-coordinators only — coordinators don't consume a slot. A full join returns `409 {full:true}`, surfaced distinctly from the one-task-per-crisis conflict (no "leave & switch" prompt)
   - [x] Volunteer count ("12 helpers") — demo heuristic: regex-parsed from `crisis.summary` text; mini-map "helpers nearby" markers are `mockHelpers`, not live volunteer data
   - [x] "I Want to Help" button → navigates to `/volunteers?crisis_id=…&task_id=…` — **dead link**: no `/volunteers` route in `App.jsx` yet (waiting on James's page)
   - [x] Link to group chat for this crisis — "Group Chat" button also navigates to `/volunteers?crisis_id=…` (same dead route)
@@ -456,7 +459,7 @@ The platform does four things:
 | MOH | data.gov.sg | Hospital bed counts, BOR | Annual | Yes |
 | OneMap | onemap.gov.sg | Basemap, geocoding, routing | Live | Yes |
 | Notify SG | GovTech | Push notifications to citizens | Live | Yes |
-| OpenAI | api.openai.com | gpt-4.1-mini (text + vision) + whisper-1 (STT) | Per request | Paid |
+| OpenAI | api.openai.com | gpt-4.1-mini (chat + vision) + gpt-5.4-mini (triage/task JSON) + whisper-1 (STT) | Per request | Paid |
 
 ---
 
@@ -464,7 +467,7 @@ The platform does four things:
 
 - Hospital bed data is **annual/static**, not live. Displayed as "last reported" values from `handler/hospitals.go` (2025 MOH figures for 10 public hospitals).
 - `src/lib/mockData.js` has been **removed** — the map, crisis detail, and home pages now read live data from the backend (crises/shelters/hospitals endpoints). Use `db/seeds/demo_crises.sql` + `DATA_SOURCE=demo` for a stable demo dataset.
-- **LLM setup:** a single OpenAI model, `gpt-4.1-mini`, handles both text and vision (`LLM_BASE_URL=https://api.openai.com/v1`, `LLM_MODEL=gpt-4.1-mini`). STT is `whisper-1` (`STT_BASE_URL`/`STT_MODEL`). This replaced the earlier Nemotron-via-OpenRouter setup (which itself replaced Gemini Flash) — gpt-4.1-mini is not a reasoning model, so the old per-call reasoning toggle is gone.
+- **LLM setup:** two OpenAI models, routed by task. `gpt-4.1-mini` (multimodal) handles chat, vision, and the situation-assessment prose (`LLM_MODEL`/`LLM_BASE_URL=https://api.openai.com/v1`). The structured-output path — triage findings → task-card JSON via `ChatJSON` — runs on `gpt-5.4-mini` (reasoning, low effort) via `LLM_JSON_MODEL`/`LLM_JSON_REASONING_EFFORT`; `buildTextRequest` switches to `max_completion_tokens` + `reasoning_effort` for GPT-5/o-series models and keeps `max_tokens` for the rest. Leaving `LLM_JSON_MODEL` blank reuses the chat model (no behaviour change). STT is `whisper-1` (`STT_BASE_URL`/`STT_MODEL`). This lineage replaced the earlier Nemotron-via-OpenRouter setup (which itself replaced Gemini Flash).
 - **Dengue:** `GET /api/data/dengue` is now fully live — it fetches from data.gov.sg on demand (poll-download → GeoJSON → cluster centroids, cached), so no ingestion goroutine is required. Note: this live data is **not** written into the `crises` table, so dengue does not yet surface in the crisis map/feed/triage unless seeded separately.
 - **Timeline live data:** `GET /api/feed` is implemented in `handler/feed.go` but `Timeline.jsx` still reads from `MOCK_FEED`. One-line fix to wire them up.
 - **Crisis insert timestamps:** `lib.crisisInsertBody` builds the insert payload for `CreateCrisis`/`UpsertCrisis` and omits `created_at`/`updated_at` so the DB `DEFAULT NOW()` applies. (Sending the struct serialised the zero `time.Time` as `0001-01-01T00:00:00Z` — `omitempty` doesn't work on a struct — which is why early reports showed a year-0001 date.)

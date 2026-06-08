@@ -287,8 +287,53 @@ func PostTaskChatMessage(c *gin.Context) {
 		return
 	}
 
+	// If the message is addressed to Brainy, generate its reply in the background
+	// and append it to the thread; the client's poll picks it up moments later.
+	if lib.AddressesBrainy(entry.MessageText) || lib.AddressesBrainy(entry.Transcript) {
+		go replyAsBrainyInTask(taskID, entry)
+	}
+
 	c.JSON(http.StatusCreated, gin.H{
 		"message":    entry,
 		"session_id": session.ID,
 	})
+}
+
+// replyAsBrainyInTask generates Brainy's answer to a question in a task chat and
+// appends it to the thread. Runs in a goroutine off the POST path so the sender
+// isn't blocked on the LLM call. Best-effort: any failure is logged and dropped.
+func replyAsBrainyInTask(taskID string, trigger lib.GroupChatMessage) {
+	task, err := lib.DB.GetTaskByID(taskID)
+	if err != nil {
+		log.Printf("[taskchat/brainy] load task %s: %v", taskID, err)
+		return
+	}
+	session, err := lib.DB.GetGroupChatSessionByTaskID(taskID)
+	if err != nil || session == nil {
+		log.Printf("[taskchat/brainy] load session %s: %v", taskID, err)
+		return
+	}
+
+	question := strings.TrimSpace(trigger.MessageText)
+	if question == "" {
+		question = strings.TrimSpace(trigger.Transcript)
+	}
+	recent := session.Messages
+	if len(recent) > 12 {
+		recent = recent[len(recent)-12:]
+	}
+
+	reply, err := lib.GenerateBrainyTaskReply(*task, recent, question)
+	if err != nil || strings.TrimSpace(reply) == "" {
+		log.Printf("[taskchat/brainy] generate reply %s: %v", taskID, err)
+		return
+	}
+
+	updated := append(session.Messages, lib.NewBrainyMessage(strings.TrimSpace(reply)))
+	if len(updated) > 500 {
+		updated = updated[len(updated)-500:]
+	}
+	if err := lib.DB.SaveGroupChatMessages(session.ID, updated); err != nil {
+		log.Printf("[taskchat/brainy] save reply %s: %v", taskID, err)
+	}
 }

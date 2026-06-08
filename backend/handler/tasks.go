@@ -124,6 +124,28 @@ func DeleteTask(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"deleted": id})
 }
 
+// MatchTasks ranks a crisis's open tasks for the calling volunteer by skill fit
+// and returns the recommended task id + Brainy's rationale. Backs the
+// "I want to help → find my match" flow on the crisis page.
+func MatchTasks(c *gin.Context) {
+	crisisID := c.Param("id")
+	userID := c.GetString("userID")
+	if userID == "" {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "missing user identity"})
+		return
+	}
+	name := ""
+	if u, err := lib.DB.GetUserByID(userID); err == nil && u != nil {
+		name = u.Name
+	}
+	report, err := lib.MatchTasksForUser(crisisID, userID, name)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "could not match tasks"})
+		return
+	}
+	c.JSON(http.StatusOK, report)
+}
+
 // JoinTask records the caller as a member of a task, which gates access to that
 // task's group chat. Residents/volunteers may hold at most ONE task per crisis
 // (the cap that makes the demo legible); coordinators are unlimited. Idempotent:
@@ -199,9 +221,15 @@ func JoinTask(c *gin.Context) {
 			log.Printf("[tasks/join] decrement volunteers_needed for %s: %v", taskID, err)
 		}
 	}
-	// Lazily open the task's group chat thread so it's ready when they arrive.
-	if _, err := lib.DB.GetOrCreateTaskChatSession(taskID, userID); err != nil {
+	// Lazily open the task's group chat thread, and the first time it's created
+	// seed Brainy's welcome brief so the team has orientation on arrival.
+	if session, err := lib.DB.GetOrCreateTaskChatSession(taskID, userID); err != nil {
 		log.Printf("[tasks/join] open task chat %s: %v", taskID, err)
+	} else if len(session.Messages) == 0 {
+		welcome := lib.BrainyTaskWelcome(*task)
+		if err := lib.DB.SaveGroupChatMessages(session.ID, []lib.GroupChatMessage{welcome}); err != nil {
+			log.Printf("[tasks/join] seed task chat welcome %s: %v", taskID, err)
+		}
 	}
 
 	cache.GlobalCache.Invalidate("crisis:" + task.CrisisID)

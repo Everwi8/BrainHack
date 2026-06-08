@@ -53,6 +53,7 @@ type Task struct {
 	Status           string    `json:"status,omitempty"`
 	Priority         string    `json:"priority,omitempty"`
 	VolunteersNeeded int       `json:"volunteers_needed,omitempty"`
+	SkillsNeeded     []string  `json:"skills_needed,omitempty"`
 	AssignedTo       *string   `json:"assigned_to"`
 	CreatedBy        *string   `json:"created_by"`
 	CreatedAt        time.Time `json:"created_at,omitempty"`
@@ -463,6 +464,73 @@ func (c *Client) ListMemberTasks(userID string) ([]Task, error) {
 		}
 	}
 	return out, nil
+}
+
+// ─── Volunteer profiles ──────────────────────────────────────────────────────
+// One row per user: the skills they offer + last-known location, used by the
+// "find my match" flow to score open tasks for that volunteer.
+
+type Volunteer struct {
+	ID        string    `json:"id,omitempty"`
+	UserID    string    `json:"user_id"`
+	Skills    []string  `json:"skills"`
+	Lat       *float64  `json:"lat,omitempty"`
+	Lng       *float64  `json:"lng,omitempty"`
+	Available bool      `json:"available"`
+	CreatedAt time.Time `json:"created_at,omitempty"`
+	UpdatedAt time.Time `json:"updated_at,omitempty"`
+}
+
+// GetVolunteerByUser returns the caller's volunteer profile, or nil (no error)
+// if they haven't set one up yet.
+func (c *Client) GetVolunteerByUser(userID string) (*Volunteer, error) {
+	data, err := c.req("GET", "volunteers?user_id=eq."+userID+"&select=*&limit=1", nil, nil)
+	if err != nil {
+		return nil, err
+	}
+	var rows []Volunteer
+	if err := json.Unmarshal(data, &rows); err != nil {
+		return nil, err
+	}
+	if len(rows) == 0 {
+		return nil, nil
+	}
+	return &rows[0], nil
+}
+
+// UpsertVolunteer creates or updates the caller's single volunteer profile
+// (one row per user, enforced by the unique index on user_id).
+func (c *Client) UpsertVolunteer(v Volunteer) (*Volunteer, error) {
+	existing, err := c.GetVolunteerByUser(v.UserID)
+	if err != nil {
+		return nil, err
+	}
+	if existing != nil {
+		updates := map[string]interface{}{
+			"skills":    v.Skills,
+			"available": v.Available,
+			"lat":       v.Lat,
+			"lng":       v.Lng,
+		}
+		data, err := c.req("PATCH", "volunteers?user_id=eq."+v.UserID, updates, nil)
+		if err != nil {
+			return nil, err
+		}
+		var rows []Volunteer
+		if err := json.Unmarshal(data, &rows); err != nil || len(rows) == 0 {
+			return nil, fmt.Errorf("update volunteer failed")
+		}
+		return &rows[0], nil
+	}
+	data, err := c.req("POST", "volunteers", v, nil)
+	if err != nil {
+		return nil, err
+	}
+	var rows []Volunteer
+	if err := json.Unmarshal(data, &rows); err != nil || len(rows) == 0 {
+		return nil, fmt.Errorf("create volunteer failed")
+	}
+	return &rows[0], nil
 }
 
 // ─── Users ───────────────────────────────────────────────────────────────────

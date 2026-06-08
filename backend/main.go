@@ -88,6 +88,8 @@ func main() {
 		// per crisis for residents/volunteers; coordinators unlimited (handler logic).
 		api.POST("/tasks/:id/join", middleware.RequireAuth(), handler.JoinTask)
 		api.DELETE("/tasks/:id/join", middleware.RequireAuth(), handler.LeaveTask)
+		// Skill-based matching: rank a crisis's open tasks for the calling volunteer.
+		api.GET("/crises/:id/match", middleware.RequireAuth(), handler.MatchTasks)
 
 		// Perrin — AI chat + triage. Chat requires auth so each user's
 		// conversation history is keyed to their account and isolated from others.
@@ -116,7 +118,9 @@ func main() {
 
 		// James — volunteers + voice
 		api.GET("/volunteers", handler.ListVolunteers)
-		api.POST("/volunteers", middleware.RequireAuth(), handler.RegisterVolunteer)
+		api.GET("/volunteers/skills", handler.SkillCatalog)                          // canonical skill catalogue for the profile form
+		api.GET("/volunteers/me", middleware.RequireAuth(), handler.GetMyVolunteer)  // caller's saved skill profile
+		api.POST("/volunteers", middleware.RequireAuth(), handler.RegisterVolunteer) // create/update own profile
 		api.POST("/voice", middleware.RequireAuth(), handler.Voice)
 		api.GET("/groupchat/:crisisID/messages", handler.GetGroupChatMessages)
 		api.POST("/groupchat/:crisisID/messages", middleware.RequireAuth(), handler.PostGroupChatMessage)
