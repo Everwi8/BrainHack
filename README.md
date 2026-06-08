@@ -1,212 +1,168 @@
-# BrainHack — Developer Guide
+# BrainySG — AI Crisis Response for Singapore
+
+BrainySG is a community crisis-response app for Singapore. It pulls live data
+from cross-agency government feeds (NEA, LTA, PUB), surfaces active situations on
+a map, and uses an LLM to triage each crisis into a plain-language summary plus
+concrete volunteer tasks. Residents can report incidents, coordinators approve
+and manage them, and volunteers join tasks and coordinate in per-task group
+chats. "Brainy" is the in-app assistant that answers questions over the live
+situation via text, photo, or voice.
+
+See [`architecture.md`](architecture.md) for a system diagram.
+
+---
 
 ## Tech Stack
 
 | Layer | Tech |
 | --- | --- |
-| Frontend | React 19 + Vite, TailwindCSS, React Router v7, lucide-react |
-| Backend | Go + Gin framework |
-| Database | Supabase (PostgreSQL) |
-| Auth | JWT (issued by backend) |
-| AI | Gemini Flash API |
-| Maps | OneMap Singapore |
-| STT | Google STT or Whisper API |
+| Frontend | React 19 + Vite, React Router v7, lucide-react |
+| Maps | Leaflet + react-leaflet (+ marker clustering), OneMap tiles |
+| Backend | Go + Gin |
+| Database / Storage | Supabase (PostgreSQL + Storage) |
+| Auth | JWT issued by the backend, role-based (resident / volunteer / coordinator) |
+| LLM | OpenAI `gpt-4.1-mini` — single multimodal model for text **and** vision |
+| Speech-to-text | OpenAI `whisper-1` |
+| Live data | NEA (weather, haze, dengue), LTA DataMall (MRT alerts), PUB (flood sensors) |
 
 ---
 
-## Running the project
+## Getting started
 
-### Frontend
+You need **Node 18+**, **Go 1.21+**, and a **Supabase** project.
+
+### 1. Database
+
+Run the migrations in `backend/db/migrations/` **in order** against your Supabase
+project (paste each into the SQL editor, or pipe with `psql`). They are not run
+automatically:
+
+```text
+001_initial.sql          tables: crises, tasks, users, volunteers, reports
+002_chat_sessions.sql    per-user chat history (JSONB)
+003_rbac_crisis_approval.sql   roles + crisis approval queue
+004_crisis_sensors.sql   sensor metadata on crises
+005_task_groups.sql      persisted AI tasks + per-task group chats
+```
+
+Then load demo data from `backend/db/seeds/`:
+
+- `seed_users.sql` — the 10 demo accounts (see [`DEMO_CREDENTIALS.md`](DEMO_CREDENTIALS.md))
+- `demo_crises.sql` — curated crisis scenario (used when `DATA_SOURCE=demo`)
+
+### 2. Backend
+
+```bash
+cd backend
+cp .env.example .env   # fill in your keys (see below)
+go mod tidy
+go run main.go         # http://localhost:8080
+```
+
+### 3. Frontend
 
 ```bash
 cd frontend
 npm install
-npm run dev        # http://localhost:5173
+npm run dev            # http://localhost:5173
 ```
 
-### Backend
-
-```bash
-cd backend
-cp .env.example .env   # fill in your keys
-go mod tidy
-go run main.go         # http://localhost:8080
-```
+The frontend reads the backend URL from `VITE_API_URL` (`frontend/.env`,
+defaults to `http://localhost:8080`).
 
 ---
 
 ## Environment variables
 
-Copy `backend/.env.example` to `backend/.env` and fill in:
+Copy `backend/.env.example` to `backend/.env`:
 
 | Variable | Description |
 | --- | --- |
-| `PORT` | Backend port (default 8080) |
+| `PORT` | Backend port (default `8080`) |
 | `CORS_ORIGIN` | Frontend origin (default `http://localhost:5173`) |
-| `SUPABASE_URL` | From your Supabase project settings |
-| `SUPABASE_ANON_KEY` | Public anon key |
-| `SUPABASE_SERVICE_ROLE_KEY` | Server-side only — keep secret |
+| `DATA_SOURCE` | `demo` serves only seed crises and pauses live ingestion; blank = live feeds |
+| `SUPABASE_URL` | From Supabase → Settings → API |
+| `SUPABASE_PUBLISHABLE_KEY` | Public (anon) key |
+| `SUPABASE_SECRET_KEY` | Server-side service key — keep secret |
 | `JWT_SECRET` | Any long random string |
-| `GEMINI_API_KEY` | From Google AI Studio |
+| `LLM_API_KEY` / `LLM_BASE_URL` / `LLM_MODEL` | OpenAI chat-completions; defaults `gpt-4.1-mini` |
+| `STT_API_KEY` / `STT_BASE_URL` / `STT_MODEL` | Whisper-compatible STT; defaults `whisper-1` |
+| `LTA_API_KEY` | LTA DataMall (free at datamall.lta.gov.sg); blank skips MRT ingestion |
 
-Copy `frontend/.env.example` to `frontend/.env` if needed.
+Frontend (`frontend/.env.example` → `frontend/.env`):
+
+| Variable | Description |
+| --- | --- |
+| `VITE_API_URL` | Backend base URL (default `http://localhost:8080`) |
 
 ---
 
-## API base URL
+## Demo accounts
 
-All backend routes are prefixed `/api`. The frontend `lib/api.js` should point to `http://localhost:8080`.
+All 10 demo accounts use the password `password`. The login screen has a
+one-click preset button per account (auto-registers if missing), so you usually
+don't need to type credentials. Full list in [`DEMO_CREDENTIALS.md`](DEMO_CREDENTIALS.md).
 
 ---
 
-## Ownership map
+## Data sources
 
-### Sanjey — Data Pipeline + Backend Core
+Set `DATA_SOURCE=demo` to run the app on a curated, deterministic scenario
+(`db/seeds/demo_crises.sql`) — live ingestion is paused so seed rows aren't
+overwritten. Leave it blank for **live mode**, where three ingestion goroutines
+poll NEA, LTA, and PUB every 5 minutes and upsert into Supabase. The source can
+also be flipped at runtime via `POST /api/admin/data-source`.
 
-**Your files:**
+---
+
+## API overview
+
+All routes are prefixed `/api`. Reads are mostly public; writes require a JWT,
+and some are gated to the `coordinator` role.
+
+| Area | Routes |
+| --- | --- |
+| Auth | `POST /auth/register`, `POST /auth/login` → `{ token }` |
+| Crises (read) | `GET /crises`, `GET /crises/:id`, `GET /crises/:id/triage` |
+| Crises (report) | `POST /crises`, `PATCH /crises/:id`, `GET /crises/mine` |
+| Crises (coordinator) | `GET /crises/pending`, `POST /crises/:id/{approve,reject,resolve}` |
+| Tasks | `GET /tasks`, `GET /tasks/mine`, `POST/PATCH/DELETE /tasks/:id`, `POST/DELETE /tasks/:id/join` |
+| AI chat | `POST /chat`, `POST /chat/photo`, `GET/POST/DELETE /chat/sessions[/:id]` |
+| Triage | `GET /triage`, `GET /triage/tasks` |
+| Data | `GET /data/{weather,haze,floods,transport,dengue}`, `GET /hospitals`, `GET /shelters`, `GET /feed` |
+| Map | `GET /map/markers` |
+| Volunteers / voice | `GET/POST /volunteers`, `POST /voice` |
+| Group chat | `GET/POST /groupchat/:crisisID/messages`, `POST /groupchat/image` |
+| Task chat | `GET/POST /taskchat/:taskID/messages` (membership-gated) |
+| Admin | `GET/POST /admin/data-source` |
+
+---
+
+## Project structure
 
 ```text
 backend/
-├── main.go                   ← router wiring (owns overall structure)
-├── handler/auth.go           ← POST /api/auth/register, POST /api/auth/login
-├── handler/crises.go         ← GET /api/crises, GET /api/crises/:id
-├── handler/tasks.go          ← GET/POST/PUT/DELETE /api/tasks
-├── middleware/auth.go        ← JWT verification middleware
-├── middleware/cors.go        ← CORS headers
-├── cache/cache.go            ← 5-min in-memory cache, graceful degradation
-├── ingestion/nea.go          ← NEA: weather, haze, dengue
-├── ingestion/lta.go          ← LTA DataMall: MRT disruptions
-├── ingestion/pub.go          ← PUB MyWaters: flood sensors, water levels
-├── ingestion/moh.go          ← MOH open data
-├── lib/supabase.go           ← Supabase REST client
-└── db/
-    ├── schema.sql            ← tables: crises, tasks, users, volunteers, reports
-    ├── migrations/
-    └── seeds/
-```
+├── main.go              router wiring + ingestion goroutines + graceful shutdown
+├── handler/             HTTP handlers (auth, crises, tasks, chat, map, data, …)
+├── middleware/          JWT auth guard, role guard, CORS
+├── ingestion/           nea.go, lta.go, pub.go — 5-min pollers → Supabase
+├── lib/                 llm.go, stt.go, triage*.go, taskgen.go, datasource.go, supabase.go
+├── cache/               in-memory cache with graceful degradation
+└── db/                  schema.sql, migrations/, seeds/
 
-**Endpoints you must expose (others depend on these):**
-
-- `GET /api/crises` — accepts `?lat=&lng=&radius=` query params
-- `GET /api/crises/:id`
-- `GET /api/tasks`, `POST /api/tasks`, `PUT /api/tasks/:id`, `DELETE /api/tasks/:id`
-- `POST /api/auth/register`, `POST /api/auth/login` → returns `{ token }`
-
----
-
-### Aiya — App Shell + Home Page
-
-**Your files:**
-
-```text
 frontend/src/
-├── main.jsx                        ← React Router setup
-├── App.jsx                         ← root layout + routes
-├── pages/Home.jsx                  
-├── pages/Help.jsx                  
-├── components/layout/NavBar.jsx    
-├── components/crisis/CrisisCard.jsx
-└── components/crisis/BrainyPanel.jsx
+├── pages/               Home, Map, CrisisDetail, Tasks, Chat, Volunteers, ReportCrisis, …
+├── components/          chat/, crisis/, map/, volunteer/, feed/, layout/
+└── lib/                 api.js, auth.js, AuthProvider.jsx, useVoiceRecorder.js
 ```
-
-**Depends on:** `GET /api/crises` from Sanjey for the home page crisis list.
-
----
-
-### Perrin — AI Chatbot + Triage
-
-**Your files:**
-
-```text
-frontend/src/
-├── pages/Chat.jsx
-├── components/chat/MessageBubble.jsx
-├── components/chat/ChatInput.jsx         ← text + camera button
-└── components/chat/InlineShelterCard.jsx
-
-backend/
-├── handler/chat.go    ← POST /api/chat
-└── lib/gemini.go      ← Gemini Flash client, system prompt, context mgmt
-```
-
-**Depends on:** Sanjey's crisis/task data endpoints for triage thresholds. Sanjey owns `lib/supabase.go` — coordinate on chat history storage.
-
----
-
-### Jerald — Map + Crisis Detail
-
-**Your files:**
-
-```text
-frontend/src/
-├── pages/Map.jsx
-├── pages/CrisisDetail.jsx           ← AI summary, task cards, "I Want to Help" button
-├── components/map/MapView.jsx       ← OneMap embed + filter toggles
-└── components/map/CrisisMarker.jsx  ← severity-coded red dot markers
-
-backend/
-└── handler/map.go    ← GET /api/map/markers
-```
-
-**Depends on:**
-
-- Sanjey's `GET /api/crises/:id` for crisis detail data and tasks
-- Perrin's triage output (AI summary) for the Crisis Detail page
-
----
-
-### James — Volunteer System + Group Chat + Voice
-
-**Your files:**
-
-```text
-frontend/src/
-├── pages/Volunteers.jsx
-├── components/volunteer/VolunteerForm.jsx   ← skill input, availability toggle
-├── components/volunteer/TaskTracker.jsx     ← Pending → Assigned → In Progress → Resolved
-└── components/volunteer/VoiceRecorder.jsx  ← record → stop → transcribing → sent
-
-backend/
-└── handler/volunteers.go   ← GET/POST /api/volunteers, POST /api/voice
-```
-
-**Depends on:**
-
-- Sanjey's task routes for assignment + status updates
-- Perrin's `POST /api/chat` — forward transcribed voice text there as a standard message
-
----
-
-## Shared files — coordinate before editing
-
-| File | Owner | Used by |
-| --- | --- | --- |
-| `frontend/src/lib/api.js` | Aiya | everyone making API calls |
-| `frontend/src/lib/supabase.js` | Aiya | anyone reading DB client-side |
-| `frontend/src/hooks/useCrises.js` | shared | Aiya, Jerald |
-| `frontend/src/hooks/useAuth.js` | shared | Aiya, Perrin, James |
-| `backend/main.go` | Sanjey | Sanjey registers all routes here |
-| `backend/db/schema.sql` | Sanjey | everyone — source of truth for table shapes |
-
----
-
-## Icons
-
-Use `lucide-react` for all icons — already installed.
-
-```jsx
-import { AlertTriangle, MapPin, Phone, User } from 'lucide-react'
-
-<AlertTriangle size={20} className="text-red-500" />
-```
-
-Browse icons at [lucide.dev](https://lucide.dev).
 
 ---
 
 ## Notes
 
-- The backend default port is **8080** (not 3000 — it's Go, not Express).
-- All protected routes should use `middleware.RequireAuth()` from `backend/middleware/auth.go` — Sanjey's job to wire up.
-- For real-time group chat (James), consider a WebSocket handler in a new `handler/ws.go` — coordinate with Sanjey so it's registered in `main.go`.
-- Ingestion scripts (Sanjey) run as background goroutines on startup and populate the `crises` table that everyone reads from.
+- Backend default port is **8080** (Go/Gin, not Express).
+- Protected routes use `middleware.RequireAuth()`; coordinator-only routes add
+  `middleware.RequireRole("coordinator")`.
+- The LLM layer (`lib/llm.go`) is one multimodal client for chat, photo triage,
+  and task generation; `lib/stt.go` handles voice → text via Whisper.
+- Icons come from [`lucide-react`](https://lucide.dev) — already installed.
