@@ -52,6 +52,45 @@ func regionContains(region string, lat, lng float64) bool {
 	return lat >= b.minLat && lat <= b.maxLat && lng >= b.minLng && lng <= b.maxLng
 }
 
+// LocationLabel is the location string used to personalise chat replies. It
+// prefers a precise OneMap neighbourhood ("near Block 402, Ang Mo Kio Avenue
+// 10") and falls back to the coarse compass region ("in eastern Singapore")
+// when OneMap is unconfigured or the lookup fails.
+func LocationLabel(lat, lng float64) string {
+	if precise := ReverseGeocode(lat, lng); precise != "" {
+		return precise
+	}
+	return AreaLabel(lat, lng)
+}
+
+// AreaLabel turns a coordinate into a short, human-readable location used to
+// personalise chat replies, e.g. "in eastern Singapore". It classifies the
+// point into a coarse compass region — enough to orient advice, not a precise
+// reverse-geocode. Unlike the triage region boxes (which have gaps), this
+// partitions the whole island so any in-bounds coordinate gets a real region.
+// A zero or clearly out-of-Singapore coordinate yields a generic fallback.
+func AreaLabel(lat, lng float64) string {
+	if lat == 0 && lng == 0 {
+		return ""
+	}
+	// Rough Singapore bounding box — outside it we can't claim a region.
+	if lat < 1.15 || lat > 1.50 || lng < 103.55 || lng > 104.10 {
+		return "in Singapore"
+	}
+	switch {
+	case lat >= 1.41:
+		return "in northern Singapore"
+	case lat <= 1.28:
+		return "in southern Singapore"
+	case lng <= 103.78:
+		return "in western Singapore"
+	case lng >= 103.90:
+		return "in eastern Singapore"
+	default:
+		return "in central Singapore"
+	}
+}
+
 // haversineKm returns the great-circle distance between two points in km.
 func haversineKm(lat1, lng1, lat2, lng2 float64) float64 {
 	const earthKm = 6371.0

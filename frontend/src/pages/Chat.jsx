@@ -72,6 +72,38 @@ export default function Chat() {
   const location = useLocation();
   const navigate = useNavigate();
   const consumedIntentRef = useRef(null); // guards against re-running the same arrival intent
+  const geoRef = useRef(null);            // { lat, lng } once geolocation resolves, for personalisation
+
+  // Warm the location cache on mount so the first message usually has coords.
+  // Best-effort: failure/denial just leaves geoRef null and we personalise by
+  // name only.
+  useEffect(() => {
+    if (!navigator.geolocation) return;
+    navigator.geolocation.getCurrentPosition(
+      (pos) => { geoRef.current = { lat: pos.coords.latitude, lng: pos.coords.longitude }; },
+      () => {},
+      { timeout: 8000, maximumAge: 300000 },
+    );
+  }, []);
+
+  // ensureGeo resolves the user's coordinates at send time: it reuses a cached
+  // fix, otherwise asks the browser again (permission may have been granted
+  // after the mount attempt). Resolves to null if unavailable/denied so the
+  // caller can still send without location.
+  const ensureGeo = useCallback(() => {
+    if (geoRef.current) return Promise.resolve(geoRef.current);
+    if (!navigator.geolocation) return Promise.resolve(null);
+    return new Promise((resolve) => {
+      navigator.geolocation.getCurrentPosition(
+        (pos) => {
+          geoRef.current = { lat: pos.coords.latitude, lng: pos.coords.longitude };
+          resolve(geoRef.current);
+        },
+        () => resolve(null),
+        { timeout: 8000, maximumAge: 300000 },
+      );
+    });
+  }, []);
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -154,6 +186,11 @@ export default function Chat() {
     form.append("image", file);
     if (caption) form.append("caption", caption);
     if (sessionId) form.append("session_id", sessionId);
+    const photoGeo = await ensureGeo();
+    if (photoGeo) {
+      form.append("lat", photoGeo.lat);
+      form.append("lng", photoGeo.lng);
+    }
 
     try {
       const res = await api.postForm("/api/chat/photo", form);
@@ -184,7 +221,12 @@ export default function Chat() {
     setIsTyping(true);
 
     try {
-      const res = await api.post("/api/chat", { message: trimmed, session_id: sessionId });
+      const coords = await ensureGeo();
+      const res = await api.post("/api/chat", {
+        message: trimmed,
+        session_id: sessionId,
+        ...(coords ?? {}),
+      });
       if (res.session_id) setSessionId(res.session_id);
       setMessages(prev => [...prev, {
         id: Date.now(), role: "bot", text: res.reply, timestamp: nowTime(),

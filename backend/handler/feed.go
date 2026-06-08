@@ -70,6 +70,13 @@ func GetFeed(c *gin.Context) {
 		if status == "" {
 			status = "active"
 		}
+		// Don't format a zero time.Time — it serialises as "0001-01-01T00:00:00Z"
+		// and the frontend would render it as "739774 days ago". Emit "" instead
+		// so the feed card simply shows no timestamp.
+		createdAt := ""
+		if !crisis.CreatedAt.IsZero() {
+			createdAt = crisis.CreatedAt.UTC().Format(time.RFC3339)
+		}
 		items = append(items, FeedItem{
 			ID:         crisis.ID,
 			Tag:        tag,
@@ -78,7 +85,7 @@ func GetFeed(c *gin.Context) {
 			Location:   crisis.LocationName,
 			Body:       crisis.Description,
 			ImageURL:   nil,
-			CreatedAt:  crisis.CreatedAt.UTC().Format(time.RFC3339),
+			CreatedAt:  createdAt,
 			HelpNeeded: status == "active" && crisis.Severity != "low",
 		})
 	}

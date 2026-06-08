@@ -23,11 +23,18 @@ const (
 
 You help residents navigate floods, haze, dengue outbreaks, MRT disruptions, fires, and health alerts in Singapore.
 
+You are part of BrainySG, the resident's designated app for live crisis updates. BrainySG already aggregates real-time data from NEA, LTA, PUB and MOH and surfaces it here, so THIS app is their single source of truth for updates.
+
 Personality:
 - Reassuring and concise, never alarmist
 - Actionable: lead with the most important safety step first
-- Local: you know Singapore's agencies (NEA, LTA, PUB, MOH, SCDF), geography, and emergency numbers
+- Local: you know Singapore's geography, agencies (NEA, LTA, PUB, MOH, SCDF), and emergency numbers
 - For life-threatening situations always direct to 995 (SCDF) or 999 (Police) first
+
+Authoritative source:
+- Do NOT tell the user to "monitor", "follow", "stay tuned to", or "check" NEA / PUB / LTA / MOH websites, apps, hotlines, or social media for updates — you already provide that data here. Instead reassure them they will get updates right here in this app.
+- You may name an agency as the origin of a fact (e.g. "PUB reports the canal is near capacity"), but never redirect the user elsewhere for updates.
+- The only external contacts you ever direct people to are emergency services: 995 (SCDF / ambulance / fire) and 999 (Police).
 
 Response style:
 - Under 150 words unless the user asks for detail
@@ -35,6 +42,32 @@ Response style:
 - For shelter/hospital queries: give name, rough distance, and any available link
 - For crisis queries: safety action → context → next steps`
 )
+
+// UserContext personalises Brainy's replies with who it is talking to and
+// roughly where they are. Both fields are optional — a zero UserContext adds
+// nothing to the prompt.
+type UserContext struct {
+	Name string // the user's first name, blank if unknown
+	Area string // human-readable location, e.g. "near Tampines in east Singapore"
+}
+
+// systemMessage renders the personalisation into a system instruction, or "" if
+// there is nothing to personalise with.
+func (u UserContext) systemMessage() string {
+	if u.Name == "" && u.Area == "" {
+		return ""
+	}
+	var b strings.Builder
+	b.WriteString("You are speaking with a specific resident — personalise your replies:\n")
+	if u.Name != "" {
+		fmt.Fprintf(&b, "- Their name is %s. Greet and address them by name naturally; don't overuse it.\n", u.Name)
+	}
+	if u.Area != "" {
+		fmt.Fprintf(&b, "- They are located %s. Prioritise crises, alerts, shelters and hospitals relevant to that area, and tailor distances/directions to it.\n", u.Area)
+	}
+	b.WriteString("Weave this in naturally — personalise, don't force it.")
+	return b.String()
+}
 
 // Message is a single chat turn. ImageURL is non-empty only for a persisted
 // photo turn — it holds the Supabase Storage URL so the conversation can render
@@ -72,9 +105,12 @@ const maxStoredTurns = 40
 // then a live triage snapshot (rebuilt fresh each call so it is never stale),
 // then the stored conversation turns. The persona/triage system messages are
 // deliberately NOT persisted — only the turns are.
-func assemblePrompt(turns []Message) []Message {
-	msgs := make([]Message, 0, len(turns)+2)
+func assemblePrompt(turns []Message, user UserContext) []Message {
+	msgs := make([]Message, 0, len(turns)+3)
 	msgs = append(msgs, Message{Role: "system", Content: brainySystem})
+	if pc := user.systemMessage(); pc != "" {
+		msgs = append(msgs, Message{Role: "system", Content: pc})
+	}
 	if ctx := currentTriageContext(); ctx != "" {
 		msgs = append(msgs, Message{Role: "system", Content: ctx})
 	}
@@ -204,10 +240,10 @@ func postCompletion(baseURL string, payload []byte) (string, error) {
 // appends the user message, asks Brainy, and returns the reply along with the
 // updated (trimmed) turns for the caller to persist. It is stateless — storage
 // lives in the handler/DB layer, keyed to the authenticated user.
-func ChatTurn(turns []Message, userMessage string) (reply string, updated []Message, err error) {
+func ChatTurn(turns []Message, userMessage string, user UserContext) (reply string, updated []Message, err error) {
 	turns = append(turns, Message{Role: "user", Content: userMessage})
 
-	reply, err = chatCompletion(assemblePrompt(turns))
+	reply, err = chatCompletion(assemblePrompt(turns, user))
 	if err != nil {
 		return "", nil, err
 	}
@@ -385,7 +421,7 @@ func ExtractPhotoObservation(caption, imageDataURL string) (PhotoObservation, er
 // not the verbose machine analysis: the analysis is fed to the model for this
 // one call only, so reloading the conversation later shows something readable
 // while the assistant's own reply still carries the context forward.
-func VisionTurn(turns []Message, caption, imageDataURL, imageURL string) (reply string, obs *PhotoObservation, updated []Message, err error) {
+func VisionTurn(turns []Message, caption, imageDataURL, imageURL string, user UserContext) (reply string, obs *PhotoObservation, updated []Message, err error) {
 	userTrace := "[Shared a photo]"
 	if caption != "" {
 		userTrace += " " + caption
@@ -401,7 +437,11 @@ func VisionTurn(turns []Message, caption, imageDataURL, imageURL string) (reply 
 		if caption != "" {
 			userPrompt += "\n\nUser's note about the photo: " + caption
 		}
-		reply, err = callVisionModel(brainySystem, userPrompt, imageDataURL)
+		sys := brainySystem
+		if pc := user.systemMessage(); pc != "" {
+			sys = brainySystem + "\n\n" + pc
+		}
+		reply, err = callVisionModel(sys, userPrompt, imageDataURL)
 		if err != nil {
 			return "", nil, nil, err
 		}
@@ -432,7 +472,7 @@ func VisionTurn(turns []Message, caption, imageDataURL, imageURL string) (reply 
 	b.WriteString("\nRespond to the user about this photo: briefly describe the situation based only on these findings (do not invent details), then give the most important safety actions.")
 
 	promptTurns := append(append([]Message{}, turns...), Message{Role: "user", Content: b.String()})
-	reply, err = chatCompletion(assemblePrompt(promptTurns))
+	reply, err = chatCompletion(assemblePrompt(promptTurns, user))
 	if err != nil {
 		return "", nil, nil, err
 	}

@@ -34,7 +34,10 @@ function display(crisis) {
 // timeAgo renders a coarse relative timestamp from an ISO string.
 function timeAgo(iso) {
   const then = new Date(iso).getTime();
-  if (!then) return "";
+  // Reject unparseable values and the Go zero-time sentinel
+  // ("0001-01-01T00:00:00Z" → large negative epoch), which would otherwise
+  // render as "739774 days ago".
+  if (!Number.isFinite(then) || then <= 0) return "";
   const secs = Math.max(0, Math.floor((Date.now() - then) / 1000));
   if (secs < 60) return "Just now";
   const mins = Math.floor(secs / 60);

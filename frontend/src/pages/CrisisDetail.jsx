@@ -80,7 +80,12 @@ const PRIORITY = {
 // "Updated X min ago" — converts an ISO timestamp into a friendly relative string.
 function timeAgo(iso) {
   if (!iso) return "just now";
-  const diffMs = Date.now() - new Date(iso).getTime();
+  const then = new Date(iso).getTime();
+  // Reject unparseable values and the Go zero-time sentinel
+  // ("0001-01-01T00:00:00Z" → large negative epoch), which would otherwise
+  // render as "739774 day(s) ago".
+  if (!Number.isFinite(then) || then <= 0) return "just now";
+  const diffMs = Date.now() - then;
   const min = Math.round(diffMs / 60000);
   if (min < 1)   return "just now";
   if (min < 60)  return `${min} min ago`;

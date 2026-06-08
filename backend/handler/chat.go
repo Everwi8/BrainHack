@@ -4,6 +4,7 @@ package handler
 
 import (
 	"net/http"
+	"strings"
 
 	"github.com/gin-gonic/gin"
 
@@ -15,8 +16,31 @@ import (
 const defaultChatTitle = "New chat"
 
 type chatReq struct {
-	Message   string `json:"message" binding:"required"`
-	SessionID string `json:"session_id"`
+	Message   string  `json:"message" binding:"required"`
+	SessionID string  `json:"session_id"`
+	Lat       float64 `json:"lat"` // optional: caller's geolocation, for personalisation
+	Lng       float64 `json:"lng"`
+}
+
+// userContext builds the personalisation passed to Brainy: the caller's first
+// name (from the users table) and a rough area derived from optional lat/lng.
+// Any piece we can't resolve is simply left blank.
+func userContext(userID string, lat, lng float64) lib.UserContext {
+	uc := lib.UserContext{Area: lib.LocationLabel(lat, lng)}
+	if u, err := lib.DB.GetUserByID(userID); err == nil && u != nil {
+		uc.Name = firstName(u.Name)
+	}
+	return uc
+}
+
+// firstName returns the leading token of a full name (Brainy addresses users by
+// first name), or the trimmed input when there is no space.
+func firstName(name string) string {
+	name = strings.TrimSpace(name)
+	if i := strings.IndexByte(name, ' '); i > 0 {
+		return name[:i]
+	}
+	return name
 }
 
 // deriveTitle turns the first user message into a short session title.
@@ -62,7 +86,7 @@ func Chat(c *gin.Context) {
 		return
 	}
 
-	reply, updated, err := lib.ChatTurn(session.Messages, req.Message)
+	reply, updated, err := lib.ChatTurn(session.Messages, req.Message, userContext(userID, req.Lat, req.Lng))
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return

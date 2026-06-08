@@ -8,6 +8,7 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"strconv"
 	"strings"
 
 	"github.com/gin-gonic/gin"
@@ -76,7 +77,11 @@ func ChatPhoto(c *gin.Context) {
 		return
 	}
 
-	reply, obs, updated, err := lib.VisionTurn(session.Messages, caption, dataURL, imageURL)
+	// Optional geolocation (multipart fields) for personalisation.
+	lat, _ := strconv.ParseFloat(c.PostForm("lat"), 64)
+	lng, _ := strconv.ParseFloat(c.PostForm("lng"), 64)
+
+	reply, obs, updated, err := lib.VisionTurn(session.Messages, caption, dataURL, imageURL, userContext(userID, lat, lng))
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return

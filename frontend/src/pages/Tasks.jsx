@@ -47,7 +47,9 @@ const FILTERS = [
 function timeAgo(iso) {
   if (!iso) return "";
   const then = new Date(iso).getTime();
-  if (Number.isNaN(then)) return "";
+  // Reject NaN and the Go zero-time sentinel ("0001-01-01T00:00:00Z" → large
+  // negative epoch), which would otherwise render as "739774d ago".
+  if (!Number.isFinite(then) || then <= 0) return "";
   const mins = Math.round((Date.now() - then) / 60000);
   if (mins < 1) return "just now";
   if (mins < 60) return `${mins} min ago`;
