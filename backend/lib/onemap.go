@@ -9,11 +9,9 @@
 package lib
 
 import (
-	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
-	"log"
 	"net/http"
 	"net/url"
 	"os"
@@ -37,24 +35,16 @@ var onemapAuth struct {
 	expires time.Time
 }
 
-// onemapToken returns a valid bearer token, or "" (no error) when OneMap is
-// unconfigured/stale so callers degrade quietly. Two modes:
-//
-//   - ONEMAP_EMAIL + ONEMAP_PASSWORD → auto-fetch and refresh (preferred; never
-//     goes stale because we re-authenticate before the 3-day expiry).
-//   - ONEMAP_TOKEN → use a manually-supplied token. OneMap tokens don't
-//     auto-renew, so we read the JWT's `exp` claim and stop using it once it
-//     expires, logging a hint to refresh it.
+// onemapToken returns a valid bearer token from ONEMAP_EMAIL + ONEMAP_PASSWORD,
+// auto-fetching and refreshing it before the ~3-day expiry. It returns "" (no
+// error) when unconfigured/unavailable so callers degrade quietly to AreaLabel.
 func onemapToken() string {
-	if email := os.Getenv("ONEMAP_EMAIL"); email != "" {
-		if password := os.Getenv("ONEMAP_PASSWORD"); password != "" {
-			return onemapTokenFromCreds(email, password)
-		}
+	email := os.Getenv("ONEMAP_EMAIL")
+	password := os.Getenv("ONEMAP_PASSWORD")
+	if email == "" || password == "" {
+		return ""
 	}
-	if tok := strings.TrimSpace(os.Getenv("ONEMAP_TOKEN")); tok != "" {
-		return validStaticToken(tok)
-	}
-	return ""
+	return onemapTokenFromCreds(email, password)
 }
 
 // onemapTokenFromCreds fetches and caches a token from credentials, refreshing
@@ -90,61 +80,6 @@ func onemapTokenFromCreds(email, password string) string {
 		onemapAuth.expires = time.Unix(secs, 0)
 	}
 	return onemapAuth.token
-}
-
-// validStaticToken returns the manually-supplied token while it is still valid,
-// using the JWT's embedded expiry. Once expired it returns "" and logs a
-// throttled hint so the caller falls back to the coarse region label.
-func validStaticToken(tok string) string {
-	exp, err := jwtExpiry(tok)
-	if err != nil {
-		// Can't read an expiry — trust the token rather than blocking lookups.
-		return tok
-	}
-	if time.Now().After(exp) {
-		warnOneMapTokenExpired(exp)
-		return ""
-	}
-	return tok
-}
-
-// jwtExpiry pulls the `exp` (unix seconds) claim out of a JWT without verifying
-// its signature — we only need the expiry, and the token is OneMap's to trust.
-func jwtExpiry(tok string) (time.Time, error) {
-	parts := strings.Split(tok, ".")
-	if len(parts) != 3 {
-		return time.Time{}, fmt.Errorf("not a JWT")
-	}
-	payload, err := base64.RawURLEncoding.DecodeString(parts[1])
-	if err != nil {
-		if payload, err = base64.StdEncoding.DecodeString(parts[1]); err != nil {
-			return time.Time{}, err
-		}
-	}
-	var claims struct {
-		Exp int64 `json:"exp"`
-	}
-	if err := json.Unmarshal(payload, &claims); err != nil || claims.Exp == 0 {
-		return time.Time{}, fmt.Errorf("no exp claim")
-	}
-	return time.Unix(claims.Exp, 0), nil
-}
-
-// onemapWarn throttles the expired-token log so it appears at most hourly.
-var onemapWarn struct {
-	mu   sync.Mutex
-	last time.Time
-}
-
-func warnOneMapTokenExpired(exp time.Time) {
-	onemapWarn.mu.Lock()
-	defer onemapWarn.mu.Unlock()
-	if time.Since(onemapWarn.last) < time.Hour {
-		return
-	}
-	onemapWarn.last = time.Now()
-	log.Printf("[onemap] ONEMAP_TOKEN expired %s ago — refresh it, or set ONEMAP_EMAIL/ONEMAP_PASSWORD for auto-renewal. Falling back to region labels.",
-		time.Since(exp).Round(time.Minute))
 }
 
 // ReverseGeocode returns a precise, human-readable neighbourhood label for a

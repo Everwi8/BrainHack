@@ -64,7 +64,7 @@ func CrisisTriage(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{
 			"crisis_id":    id,
 			"generated_at": report.GeneratedAt,
-			"findings":     report.Findings,
+			"findings":     lib.EnrichFindingsProse(report.Findings),
 			"tasks":        existing,
 		})
 		return
@@ -103,7 +103,7 @@ func CrisisTriage(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{
 		"crisis_id":    id,
 		"generated_at": report.GeneratedAt,
-		"findings":     report.Findings,
+		"findings":     lib.EnrichFindingsProse(report.Findings),
 		"tasks":        tasks,
 	})
 }

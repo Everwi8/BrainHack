@@ -162,6 +162,9 @@ function AiTaskCard({
 }) {
   const p = PRIORITY[task.priority] ?? PRIORITY.medium;
   const accent = joined ? "#16A34A" : "#EF4444";
+  // Remaining volunteer slots; 0 (omitted by the API) means the task is full.
+  const remaining = task.volunteers_needed ?? 0;
+  const full = remaining <= 0;
   return (
     <div
       style={{
@@ -178,8 +181,8 @@ function AiTaskCard({
       {task.description && <span style={{ fontSize: 12.5, color: "#6B6B6B" }}>{task.description}</span>}
 
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, marginTop: 2 }}>
-        <span style={{ display: "inline-flex", alignItems: "center", gap: 4, fontSize: 11.5, fontWeight: 700, color: "#16A34A" }}>
-          <Users size={12} /> {task.volunteers_needed} volunteer{task.volunteers_needed === 1 ? "" : "s"} needed
+        <span style={{ display: "inline-flex", alignItems: "center", gap: 4, fontSize: 11.5, fontWeight: 700, color: full && !joined ? "#9CA3AF" : "#16A34A" }}>
+          <Users size={12} /> {full && !joined ? "Fully staffed" : `${remaining} volunteer${remaining === 1 ? "" : "s"} needed`}
         </span>
 
         {/* Right-side action — depends on state */}
@@ -193,6 +196,12 @@ function AiTaskCard({
             <button onClick={onConfirm} disabled={joining} style={ctaBtn("#EF4444")}>
               {joining ? "Joining…" : "Confirm join"}
             </button>
+          </span>
+        ) : full ? (
+          <span style={{
+            display: "inline-flex", alignItems: "center", gap: 4, fontSize: 12, fontWeight: 800, color: "#9CA3AF",
+          }}>
+            <Check size={13} /> Full
           </span>
         ) : (
           <button onClick={onRequestConfirm} style={{
@@ -313,6 +322,12 @@ export default function CrisisDetail() {
       setMyTaskId(taskId);
       setConfirmingId(null);
       openTaskChat(taskId);
+      return;
+    }
+    if (status === 409 && body.full) {
+      // Task filled up before this confirm landed — show it as full, no switch.
+      setConfirmingId(null);
+      setJoinError({ taskId, message: body.error || "This task is already full." });
       return;
     }
     if (status === 409) {

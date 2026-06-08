@@ -160,7 +160,8 @@ func JoinTask(c *gin.Context) {
 		return
 	}
 
-	// Non-coordinators: enforce one task per crisis.
+	// Non-coordinators: enforce one task per crisis, and that the task still has
+	// an open volunteer slot.
 	if user.Role != "coordinator" {
 		current, err := lib.DB.MemberTaskInCrisis(userID, task.CrisisID)
 		if err != nil {
@@ -174,11 +175,29 @@ func JoinTask(c *gin.Context) {
 			})
 			return
 		}
+		if task.VolunteersNeeded < 1 {
+			c.JSON(http.StatusConflict, gin.H{
+				"error": "This task is already full — every volunteer slot has been taken.",
+				"full":  true,
+			})
+			return
+		}
 	}
 
 	if err := lib.DB.JoinTask(taskID, userID); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "could not join task"})
 		return
+	}
+	// A volunteer just filled a slot → reduce the remaining count so the card
+	// shows fewer needed and locks out once it reaches zero. Coordinators oversee
+	// rather than fill a slot, so they don't consume one.
+	if user.Role != "coordinator" {
+		if _, err := lib.DB.UpdateTask(taskID, map[string]interface{}{
+			"volunteers_needed": task.VolunteersNeeded - 1,
+			"updated_at":        time.Now(),
+		}); err != nil {
+			log.Printf("[tasks/join] decrement volunteers_needed for %s: %v", taskID, err)
+		}
 	}
 	// Lazily open the task's group chat thread so it's ready when they arrive.
 	if _, err := lib.DB.GetOrCreateTaskChatSession(taskID, userID); err != nil {
@@ -200,12 +219,26 @@ func LeaveTask(c *gin.Context) {
 		return
 	}
 
+	// Was the caller actually on this task, and are they a volunteer (not a
+	// coordinator)? Only then does leaving free a volunteer slot back up.
+	wasMember, _ := lib.DB.IsTaskMember(taskID, userID)
+	user, _ := lib.DB.GetUserByID(userID)
+
 	if err := lib.DB.LeaveTask(taskID, userID); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "could not leave task"})
 		return
 	}
 
 	if task, err := lib.DB.GetTaskByID(taskID); err == nil {
+		// Restore the slot the departing volunteer had taken (mirror of JoinTask).
+		if wasMember && user != nil && user.Role != "coordinator" {
+			if _, err := lib.DB.UpdateTask(taskID, map[string]interface{}{
+				"volunteers_needed": task.VolunteersNeeded + 1,
+				"updated_at":        time.Now(),
+			}); err != nil {
+				log.Printf("[tasks/leave] restore volunteers_needed for %s: %v", taskID, err)
+			}
+		}
 		cache.GlobalCache.Invalidate("crisis:" + task.CrisisID)
 	}
 	c.JSON(http.StatusOK, gin.H{"left": true, "task_id": taskID})

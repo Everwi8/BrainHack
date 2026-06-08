@@ -82,10 +82,49 @@ type Message struct {
 // ample room for Brainy's short replies and the task JSON envelope.
 const maxTokens = 2048
 
+// jsonMaxTokens is the (higher) cap for the structured-output path. Reasoning
+// models share this budget between hidden reasoning tokens and the visible JSON
+// body, so the JSON path needs more headroom than the short chat replies.
+const jsonMaxTokens = 4096
+
+// llmRequest is the chat-completions payload. The token cap is expressed two
+// ways because the GPT-5 / o-series reasoning models reject the legacy
+// max_tokens field and require max_completion_tokens (plus an optional
+// reasoning_effort). Exactly one of the token fields is set per request — see
+// buildTextRequest — and the unused fields are omitted.
 type llmRequest struct {
-	Model     string    `json:"model"`
-	Messages  []Message `json:"messages"`
-	MaxTokens int       `json:"max_tokens"`
+	Model               string    `json:"model"`
+	Messages            []Message `json:"messages"`
+	MaxTokens           *int      `json:"max_tokens,omitempty"`
+	MaxCompletionTokens *int      `json:"max_completion_tokens,omitempty"`
+	ReasoningEffort     string    `json:"reasoning_effort,omitempty"`
+}
+
+// isReasoningModel reports whether a model id belongs to a reasoning family that
+// uses the max_completion_tokens contract (GPT-5.x and the o-series). The older
+// gpt-4.1 family returns false and keeps using max_tokens.
+func isReasoningModel(model string) bool {
+	return strings.HasPrefix(model, "gpt-5") ||
+		strings.HasPrefix(model, "o1") ||
+		strings.HasPrefix(model, "o3") ||
+		strings.HasPrefix(model, "o4")
+}
+
+// buildTextRequest assembles a chat-completions request with the correct
+// token-budget field for the target model: max_completion_tokens (+ optional
+// reasoning_effort) for reasoning models, max_tokens otherwise.
+func buildTextRequest(model string, messages []Message, maxTok int, effort string) llmRequest {
+	req := llmRequest{Model: model, Messages: messages}
+	n := maxTok
+	if isReasoningModel(model) {
+		req.MaxCompletionTokens = &n
+		if effort != "" {
+			req.ReasoningEffort = effort
+		}
+	} else {
+		req.MaxTokens = &n
+	}
+	return req
 }
 
 type llmResponse struct {
@@ -144,6 +183,24 @@ func llmConfig() (apiKey, baseURL, model string) {
 	return
 }
 
+// jsonLLMConfig resolves the model + reasoning effort for the structured-output
+// path (triage + task-card generation). LLM_JSON_MODEL lets that path run on a
+// stronger reasoning model than the chat/vision path without affecting it; when
+// unset it falls back to the default text model, so behaviour is unchanged. For
+// a reasoning model the effort defaults to "low" unless LLM_JSON_REASONING_EFFORT
+// overrides it.
+func jsonLLMConfig() (model, effort string) {
+	model = os.Getenv("LLM_JSON_MODEL")
+	if model == "" {
+		_, _, model = llmConfig()
+	}
+	effort = os.Getenv("LLM_JSON_REASONING_EFFORT")
+	if effort == "" && isReasoningModel(model) {
+		effort = "low"
+	}
+	return
+}
+
 const (
 	maxRetries        = 3
 	baseRetryDelay    = 500 * time.Millisecond
@@ -167,7 +224,20 @@ func requestTimeout() time.Duration {
 // times with exponential backoff.
 func chatCompletion(messages []Message) (string, error) {
 	_, baseURL, model := llmConfig()
-	payload, err := json.Marshal(llmRequest{Model: model, Messages: messages, MaxTokens: maxTokens})
+	payload, err := json.Marshal(buildTextRequest(model, messages, maxTokens, ""))
+	if err != nil {
+		return "", fmt.Errorf("LLM marshal error: %w", err)
+	}
+	return postCompletion(baseURL, payload)
+}
+
+// jsonCompletion is the structured-output sibling of chatCompletion: it POSTs to
+// the same endpoint but on the JSON-path model (see jsonLLMConfig), with the
+// higher jsonMaxTokens budget and the reasoning param shape when applicable.
+func jsonCompletion(messages []Message) (string, error) {
+	_, baseURL, _ := llmConfig()
+	model, effort := jsonLLMConfig()
+	payload, err := json.Marshal(buildTextRequest(model, messages, jsonMaxTokens, effort))
 	if err != nil {
 		return "", fmt.Errorf("LLM marshal error: %w", err)
 	}
@@ -252,18 +322,30 @@ func ChatTurn(turns []Message, userMessage string, user UserContext) (reply stri
 	return reply, trimTurns(turns), nil
 }
 
+// ChatText runs a single stateless system+user exchange and returns the reply
+// text with no JSON parsing and no session history. It uses the chat model
+// (LLM_MODEL) — fast and persona-appropriate for short generated prose like the
+// triage situation assessment, where reasoning adds latency without value.
+func ChatText(systemPrompt, userPrompt string) (string, error) {
+	return chatCompletion([]Message{
+		{Role: "system", Content: systemPrompt},
+		{Role: "user", Content: userPrompt},
+	})
+}
+
 // ChatJSON sends a system instruction and user prompt expecting a JSON reply
 // and unmarshals it into target (a pointer). It is stateless — it does not
 // touch session history — and is the shared helper for triage and task-card
-// generation. The JSON payload is extracted even if the model wraps it in code
-// fences or surrounding prose.
+// generation. It runs on the JSON-path model (jsonLLMConfig), which can be a
+// stronger reasoning model than the chat/vision path. The JSON payload is
+// extracted even if the model wraps it in code fences or surrounding prose.
 func ChatJSON(systemPrompt, userPrompt string, target any) error {
 	messages := []Message{
 		{Role: "system", Content: systemPrompt},
 		{Role: "user", Content: userPrompt},
 	}
 
-	reply, err := chatCompletion(messages)
+	reply, err := jsonCompletion(messages)
 	if err != nil {
 		return err
 	}
