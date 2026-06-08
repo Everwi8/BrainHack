@@ -8,6 +8,7 @@
 --   flood  Kranji 4.1m @ 1.4255,103.7576 →  Flash Flood — Kranji      (nearest flood ≤2km)
 --   haze   Central PSI 142               →  Haze Alert — Central Region (first haze row)
 --   mrt    Line "EWL" disrupted          →  EWL Disruption …          (title contains "EWL")
+--   dengue Tampines 64 @ 1.3536,103.9436 →  Dengue Cluster — Tampines (nearest dengue ≤2km)
 --
 -- So with the server booted in demo mode, tapping a crisis circle on the map
 -- (GET /api/crises/:id/triage) returns that crisis's findings + generated tasks.
@@ -52,6 +53,17 @@ INSERT INTO crises (id, title, description, type, severity, status, lat, lng, lo
     1.3521, 103.8198, 'Central Singapore', 'nea',
     -- Haze: clear/dry, transit normal, beds steady.
     '{"nea_rain_mm": 2, "pub_drain_pct": 16, "moh_beds_avail": 33}'::jsonb
+  ),
+  (
+    '11111111-0000-0000-0000-000000000004',
+    'Dengue Cluster — Tampines',
+    'NEA red dengue cluster in Tampines. 64 cases reported. Remove stagnant water, apply repellent, and see a doctor for fever with body aches.',
+    'dengue', 'high', 'active',
+    1.3536, 103.9436, 'Tampines', 'nea',
+    -- Dengue: dry weather (mozzie breeding in stagnant water, not rain), drains
+    -- low, hospitals carrying extra fever cases so beds drawn down. nea_dengue_cases
+    -- carries the cluster count for reference (no dedicated sensor card yet).
+    '{"nea_rain_mm": 4, "pub_drain_pct": 14, "moh_beds_avail": 29, "nea_dengue_cases": 64}'::jsonb
   )
 ON CONFLICT (id) DO UPDATE SET
   title         = EXCLUDED.title,

@@ -38,6 +38,7 @@ func NewDemoDataProvider() *DemoDataProvider {
 //	flood     Kranji 4.1 m   (> floodCritM 3.5)  → critical, matches "Flash Flood — Kranji"
 //	haze      Central PSI 142 (> hazeWarnPSI 100) → warning,  matches "Haze Alert — Central Region"
 //	transport EWL disrupted                       → critical, matches "EWL Disruption …"
+//	dengue    Tampines 64 cases (> dengueCritCnt 50) → critical, matches "Dengue Cluster — Tampines"
 //	weather   Heavy rain over Kranji              → pairs with the flood for the flash-flood cascade
 func demoSnapshot() *liveSnapshot {
 	return &liveSnapshot{
@@ -58,8 +59,11 @@ func demoSnapshot() *liveSnapshot {
 			{Region: "east", PSI: 65},
 			{Region: "west", PSI: 88},
 		},
-		// No dengue cluster is seeded, so leave dengue empty to keep the demo
-		// focused on the three seeded crises (flood, haze, transport).
+		// Tampines red cluster (≥ dengueCritCnt 50) → critical dengue finding,
+		// linked to the seeded "Dengue Cluster — Tampines" crisis by proximity.
+		dengue: []DengueCluster{
+			{Locality: "Tampines", Lat: 1.3536, Lng: 103.9436, Cases: 64},
+		},
 		transport: []TransportDisruption{
 			{
 				Line:        "EWL",
