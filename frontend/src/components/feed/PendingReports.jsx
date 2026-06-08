@@ -18,12 +18,12 @@ const FIELD = {
   borderRadius: 8, padding: "9px 11px", fontSize: 14, color: "#1f2937",
   background: "#fff", outline: "none", fontFamily: "'Nunito', sans-serif",
 };
+
 const FIELD_LABEL = {
-  fontSize: 12, fontWeight: 700, letterSpacing: 0.5, color: "#6B7280", marginBottom: 6,
+  fontSize: 12, fontWeight: 700, letterSpacing: 0.5, color: "#6B7280",
+  marginBottom: 6, textAlign: "left",
 };
 
-// View/edit a pending report. Backed by PATCH /api/crises/:id — the backend only
-// lets the owner edit while the report is still pending.
 function EditReportModal({ report, onClose, onSaved }) {
   const [title, setTitle] = useState(report.title || "");
   const [description, setDescription] = useState(report.description || "");
@@ -62,7 +62,7 @@ function EditReportModal({ report, onClose, onSaved }) {
         style={{
           background: "#fff", borderRadius: 16, padding: "22px 24px",
           width: "100%", maxWidth: 460, boxShadow: "0 8px 40px rgba(0,0,0,0.25)",
-          maxHeight: "90vh", overflowY: "auto",
+          maxHeight: "90vh", overflowY: "auto", textAlign: "left",
         }}
       >
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
@@ -134,9 +134,9 @@ function Container({ title, accent, bg, border, children }) {
   return (
     <div style={{
       background: bg, border: `1px solid ${border}`, borderRadius: 16,
-      padding: "16px 18px", marginBottom: 16,
+      padding: "16px 18px", marginBottom: 16, textAlign: "left",
     }}>
-      <div style={{ fontSize: 13, fontWeight: 800, letterSpacing: 0.4, color: accent, marginBottom: 12 }}>
+      <div style={{ fontSize: 13, fontWeight: 800, letterSpacing: 0.4, color: accent, marginBottom: 12, textAlign: "left" }}>
         {title}
       </div>
       {children}
@@ -150,22 +150,27 @@ function ReportRow({ report, children }) {
     <div style={{
       background: "#fff", borderRadius: 12, padding: "12px 14px", marginBottom: 10,
       boxShadow: "0 1px 3px rgba(0,0,0,0.06)", borderLeft: `4px solid ${color}`,
+      textAlign: "left",
     }}>
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8 }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, marginBottom: 4 }}>
         <span style={{
           textTransform: "uppercase", fontSize: 10, fontWeight: 800, letterSpacing: 0.6,
           color, background: `${color}1A`, padding: "2px 8px", borderRadius: 16,
         }}>
           {report.type} · {report.severity}
         </span>
-        <span style={{ color: "#aaa", fontSize: 11 }}>
+        <span style={{ color: "#aaa", fontSize: 11, whiteSpace: "nowrap" }}>
           {report.created_at ? new Date(report.created_at).toLocaleString() : ""}
         </span>
       </div>
-      <h3 style={{ margin: "6px 0 4px", fontSize: 15, fontWeight: 800, color: "#1a1a2e" }}>{report.title}</h3>
+      <h3 style={{ margin: "6px 0 4px", fontSize: 15, fontWeight: 800, color: "#1a1a2e" }}>
+        {report.title}
+      </h3>
       <div style={{ display: "flex", alignItems: "center", gap: 4, marginBottom: children ? 10 : 0 }}>
         <MapPin size={12} color="#aaa" />
-        <span style={{ color: "#888", fontSize: 12 }}>{report.location_name || "Location not specified"}</span>
+        <span style={{ color: "#888", fontSize: 12 }}>
+          {report.location_name || "Location not specified"}
+        </span>
       </div>
       {children}
     </div>
@@ -200,11 +205,13 @@ export function ApprovalContainer() {
   if (loading || pending.length === 0) return null;
 
   return (
-    <Container title={`📋 Reports awaiting your approval (${pending.length})`} accent="#92400E" bg="#FFFBEB" border="#FDE68A">
+    <Container title={`Reports awaiting your approval (${pending.length})`} accent="#92400E" bg="#FFFBEB" border="#FDE68A">
       {pending.map((r) => (
         <ReportRow key={r.id} report={r}>
           {r.description && (
-            <p style={{ margin: "0 0 10px", color: "#555", fontSize: 13, lineHeight: 1.5 }}>{r.description}</p>
+            <p style={{ margin: "0 0 10px", color: "#555", fontSize: 13, lineHeight: 1.5 }}>
+              {r.description}
+            </p>
           )}
           <div style={{ display: "flex", gap: 8 }}>
             <button
@@ -254,11 +261,13 @@ export function MyPendingContainer() {
   if (loading || mine.length === 0) return null;
 
   return (
-    <Container title={`⏳ Your pending reports (${mine.length})`} accent="#3730A3" bg="#EEF2FF" border="#C7D2FE">
+    <Container title={`Your pending reports (${mine.length})`} accent="#3730A3" bg="#EEF2FF" border="#C7D2FE">
       {mine.map((r) => (
         <ReportRow key={r.id} report={r}>
           {r.description && (
-            <p style={{ margin: "0 0 10px", color: "#555", fontSize: 13, lineHeight: 1.5 }}>{r.description}</p>
+            <p style={{ margin: "0 0 10px", color: "#555", fontSize: 13, lineHeight: 1.5 }}>
+              {r.description}
+            </p>
           )}
           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
             <span style={{

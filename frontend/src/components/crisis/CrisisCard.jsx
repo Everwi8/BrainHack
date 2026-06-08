@@ -126,7 +126,7 @@ export default function CrisisCard({ crises = [], userPos = null, loading = fals
                       width: 32, height: 32, borderRadius: "50%",
                       background: d.tint, display: "flex", alignItems: "center", justifyContent: "center",
                     }}><Icon size={18} color={d.accent} /></div>
-                    <span style={{ fontWeight: 700, fontSize: 14, color: "#313131" }}>{c.title}</span>
+                    <span style={{ fontWeight: 700, fontSize: 14, color: "#313131", display: "block", textAlign: "left" }}>{c.title}</span>
                   </div>
                   <span style={{ fontSize: 12, fontWeight: 600, color: d.accent, display: "flex", alignItems: "center", gap: 4 }}>
                     {d.resolved
