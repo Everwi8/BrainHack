@@ -1,15 +1,17 @@
 ```mermaid
 flowchart TB
 
-subgraph FE[Frontend - React + Vite]
+subgraph FE[Frontend - React 19 + Vite]
   direction LR
-  FE_Home[Home Page]
-  FE_Map[Map Page]
+  FE_Login[Login]
+  FE_Home[Home]
+  FE_Map[Map - Leaflet + OneMap tiles]
   FE_Detail[Crisis Detail]
-  FE_Tasks[Tasks Page]
-  FE_Chat[Chat Page]
-  FE_Vol[Volunteers Page]
-  FE_Voice[Voice Recorder]
+  FE_Report[Report Crisis]
+  FE_Tasks[Tasks]
+  FE_Chat[Brainy Chat + Voice/Photo]
+  FE_Vol[Volunteers]
+  FE_Timeline[Timeline]
 end
 
 subgraph BE[Backend - Go + Gin :8080]
@@ -17,79 +19,91 @@ subgraph BE[Backend - Go + Gin :8080]
     direction LR
     BE_CORS[CORS]
     BE_AuthMW[JWT Auth Guard]
+    BE_RoleMW[Role Guard]
   end
   subgraph HANDLERS[API Handlers]
     direction LR
     BE_AuthH[Auth]
-    BE_CrisesH[Crises]
-    BE_TasksH[Tasks]
-    BE_MapH[Map]
-    BE_ChatH[Chat]
+    BE_CrisesH[Crises + Approval Queue]
+    BE_TasksH[Tasks + Membership + Matching]
+    BE_MapH[Map + Shelters]
+    BE_DataH[Data: weather/haze/flood/transport/dengue/hospitals/feed/geocode]
+    BE_TriageH[Triage]
+    BE_ChatH[Chat + Photo + Sessions]
     BE_VolH[Volunteers + Voice]
+    BE_GroupH[Group Chats: per-crisis + per-task]
+    BE_AdminH[Admin: data-source toggle]
   end
   subgraph CLIENTS[Service Clients]
     direction LR
     BE_Cache[In-Memory Cache]
     BE_Supa[Supabase Client]
-    BE_Gem[Gemini Client]
+    BE_LLM[OpenAI LLM Client]
+    BE_STT[Whisper STT Client]
+    BE_OneMap[OneMap Client]
   end
 end
 
-SUPA_DB[(Postgres DB)]
+SUPA_DB[(Supabase: Postgres + Storage)]
 
 subgraph EXT[AI + STT APIs]
   direction LR
-  EXT_Gemini[Gemini Flash]
-  EXT_STT[Google STT]
+  EXT_LLM[OpenAI gpt-4.1-mini - chat/vision]
+  EXT_LLMJSON[OpenAI gpt-5.4-mini - reasoning/JSON]
+  EXT_STT[OpenAI whisper-1]
 end
 
 subgraph GOVDATA[Gov Open Data]
   direction LR
-  EXT_NEA[NEA]
-  EXT_LTA[LTA DataMall]
-  EXT_PUB[PUB MyWaters]
-  EXT_MOH[MOH]
+  EXT_NEA[NEA - weather/haze/dengue]
+  EXT_LTA[LTA DataMall - MRT alerts]
+  EXT_PUB[PUB - flood sensors]
+  EXT_ONEMAP[OneMap - tiles + reverse geocode]
 end
 
-subgraph ING[Data Ingestion Workers]
+subgraph ING[Data Ingestion Workers - poll every 5 min, paused in demo mode]
   direction LR
   ING_NEA[NEA Worker]
   ING_LTA[LTA Worker]
   ING_PUB[PUB Worker]
-  ING_MOH[MOH Worker]
 end
 
-FE_Home & FE_Detail --> BE_CrisesH
+FE_Login --> BE_AuthH
+FE_Home & FE_Detail & FE_Report & FE_Timeline --> BE_CrisesH
 FE_Map --> BE_MapH
+FE_Map & FE_Home --> BE_DataH
+FE_Detail --> BE_TriageH
 FE_Tasks --> BE_TasksH
 FE_Chat --> BE_ChatH
-FE_Voice --> BE_VolH
+FE_Detail & FE_Tasks --> BE_GroupH
 FE_Vol --> BE_VolH
-FE_Tasks & FE_Vol --> BE_AuthH
 
-BE_AuthMW -. protects .-> BE_TasksH & BE_VolH
+BE_AuthMW -. protects .-> BE_TasksH & BE_VolH & BE_ChatH & BE_GroupH
+BE_RoleMW -. coordinator-only .-> BE_CrisesH
 
-BE_CrisesH --> BE_Cache
-BE_CrisesH & BE_TasksH & BE_MapH & BE_AuthH & BE_VolH --> BE_Supa
-BE_ChatH --> BE_Gem
+BE_CrisesH & BE_DataH & BE_MapH --> BE_Cache
+BE_CrisesH & BE_TasksH & BE_MapH & BE_AuthH & BE_VolH & BE_ChatH & BE_GroupH & BE_AdminH --> BE_Supa
+BE_ChatH & BE_TriageH --> BE_LLM
+BE_VolH --> BE_STT
+BE_ChatH & BE_DataH --> BE_OneMap
 
 BE_Supa --> SUPA_DB
-BE_Gem --> EXT_Gemini
-BE_VolH --> EXT_STT
+BE_LLM --> EXT_LLM & EXT_LLMJSON
+BE_STT --> EXT_STT
+BE_OneMap --> EXT_ONEMAP
 
 ING_NEA --> EXT_NEA
 ING_LTA --> EXT_LTA
 ING_PUB --> EXT_PUB
-ING_MOH --> EXT_MOH
-ING_NEA & ING_LTA & ING_PUB & ING_MOH --> BE_Supa
+ING_NEA & ING_LTA & ING_PUB --> BE_Supa
 
 classDef api fill:#0b1f3a,stroke:#4b9cd3,color:#fff;
 classDef fe fill:#1a2b1f,stroke:#66cc99,color:#fff;
 classDef db fill:#2b1a2b,stroke:#cc66cc,color:#fff;
 classDef ext fill:#3a2b0b,stroke:#f0c36d,color:#fff;
 
-class BE_AuthH,BE_CrisesH,BE_TasksH,BE_MapH,BE_ChatH,BE_VolH api;
-class FE_Home,FE_Map,FE_Detail,FE_Tasks,FE_Chat,FE_Vol,FE_Voice fe;
+class BE_AuthH,BE_CrisesH,BE_TasksH,BE_MapH,BE_DataH,BE_TriageH,BE_ChatH,BE_VolH,BE_GroupH,BE_AdminH api;
+class FE_Login,FE_Home,FE_Map,FE_Detail,FE_Report,FE_Tasks,FE_Chat,FE_Vol,FE_Timeline fe;
 class SUPA_DB db;
-class EXT_Gemini,EXT_STT ext;
+class EXT_LLM,EXT_LLMJSON,EXT_STT ext;
 ```
