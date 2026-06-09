@@ -40,6 +40,17 @@ func (c *Cache) get(key string) (interface{}, bool) {
 	return e.value, true
 }
 
+// Get returns a cached value only when present AND still within its TTL. It is
+// the read used for cases (like LLM response caching) that must never serve a
+// stale value — unlike GetOrFetch, a miss returns (nil, false) rather than
+// triggering a fetch.
+func (c *Cache) Get(key string) (interface{}, bool) {
+	if c.isExpired(key) {
+		return nil, false
+	}
+	return c.get(key)
+}
+
 func (c *Cache) isExpired(key string) bool {
 	c.mu.RLock()
 	defer c.mu.RUnlock()

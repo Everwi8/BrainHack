@@ -110,6 +110,59 @@ func Chat(c *gin.Context) {
 	})
 }
 
+// ChatStream is the streaming counterpart of Chat: it answers over Server-Sent
+// Events, pushing each token as it is generated so the UI renders the reply as
+// it streams instead of waiting for the whole completion. It emits three event
+// types — "token" {text}, "error" {error}, and a final "done" {reply,
+// session_id, title} — then persists the full turn just like Chat. Request
+// validation and session resolution happen before any SSE bytes are written, so
+// those failures can still return a normal JSON error.
+func ChatStream(c *gin.Context) {
+	var req chatReq
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	userID := c.GetString("userID")
+	session, err := resolveSession(userID, req.SessionID, deriveTitle(req.Message))
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "chat session not found"})
+		return
+	}
+
+	c.Header("Content-Type", "text/event-stream")
+	c.Header("Cache-Control", "no-cache")
+	c.Header("Connection", "keep-alive")
+	c.Header("X-Accel-Buffering", "no") // tell proxies not to buffer the stream
+
+	onToken := func(tok string) {
+		c.SSEvent("token", gin.H{"text": tok})
+		c.Writer.Flush()
+	}
+
+	reply, updated, err := lib.ChatTurnStream(session.Messages, req.Message, userContext(userID, req.Lat, req.Lng), onToken)
+	if err != nil {
+		c.SSEvent("error", gin.H{"error": err.Error()})
+		c.Writer.Flush()
+		return
+	}
+
+	// Give an untitled session a title from its first message.
+	title := session.Title
+	if title == "" || title == defaultChatTitle {
+		title = deriveTitle(req.Message)
+	}
+	if err := lib.DB.SaveChatMessages(session.ID, updated, title); err != nil {
+		c.SSEvent("error", gin.H{"error": err.Error()})
+		c.Writer.Flush()
+		return
+	}
+
+	c.SSEvent("done", gin.H{"reply": reply, "session_id": session.ID, "title": title})
+	c.Writer.Flush()
+}
+
 // crisisChatReq is the Crisis Detail drawer's payload: a question plus the
 // recent on-screen conversation for continuity. Stateless — not persisted.
 type crisisChatReq struct {

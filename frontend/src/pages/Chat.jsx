@@ -220,23 +220,47 @@ export default function Chat() {
     setInput("");
     setIsTyping(true);
 
+    // Stream the reply over SSE: show the typing indicator until the first
+    // token, then drop it and grow a single bot bubble token-by-token.
+    const botId = Date.now() + 1;
+    let acc = "";
+    let started = false;
+    const appendToken = (tok) => {
+      acc += tok;
+      if (!started) {
+        started = true;
+        setIsTyping(false);
+        setMessages(prev => [...prev, {
+          id: botId, role: "bot", text: acc, timestamp: nowTime(),
+        }]);
+      } else {
+        setMessages(prev => prev.map(m => m.id === botId ? { ...m, text: acc } : m));
+      }
+    };
+
     try {
       const coords = await ensureGeo();
-      const res = await api.post("/api/chat", {
+      await api.postStream("/api/chat/stream", {
         message: trimmed,
         session_id: sessionId,
         ...(coords ?? {}),
+      }, {
+        onToken: appendToken,
+        onDone: (info) => {
+          if (info.session_id) setSessionId(info.session_id);
+          loadSessions(); // refresh sidebar order/title (and pick up a new session)
+        },
+        onError: (msg) => {
+          const text = `Sorry, I couldn't reach Brainy just now. ${msg}`;
+          if (started) {
+            setMessages(prev => prev.map(m => m.id === botId ? { ...m, text } : m));
+          } else {
+            setMessages(prev => [...prev, {
+              id: botId, role: "bot", text, timestamp: nowTime(),
+            }]);
+          }
+        },
       });
-      if (res.session_id) setSessionId(res.session_id);
-      setMessages(prev => [...prev, {
-        id: Date.now(), role: "bot", text: res.reply, timestamp: nowTime(),
-      }]);
-      loadSessions(); // refresh sidebar order/title (and pick up a new session)
-    } catch (err) {
-      setMessages(prev => [...prev, {
-        id: Date.now(), role: "bot", timestamp: nowTime(),
-        text: `Sorry, I couldn't reach Brainy just now. ${err.message}`,
-      }]);
     } finally {
       setIsTyping(false);
     }

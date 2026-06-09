@@ -99,6 +99,7 @@ func main() {
 		// Perrin — AI chat + triage. Chat requires auth so each user's
 		// conversation history is keyed to their account and isolated from others.
 		api.POST("/chat", middleware.RequireAuth(), handler.Chat)
+		api.POST("/chat/stream", middleware.RequireAuth(), handler.ChatStream) // SSE token streaming
 		api.POST("/chat/photo", middleware.RequireAuth(), handler.ChatPhoto)
 		api.GET("/chat/sessions", middleware.RequireAuth(), handler.ListChatSessions)
 		api.POST("/chat/sessions", middleware.RequireAuth(), handler.CreateChatSession)
