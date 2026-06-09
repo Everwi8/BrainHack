@@ -288,6 +288,13 @@
     flex-direction: column;
     padding: 0 12px 20px;
   }
+  /* Explicit height so Leaflet's container has a real size at init time.
+     height:100% alone fails here because the column-flex parent has no
+     defined height — only minHeight, which percentage children can't inherit. */
+  .map-area {
+    height: 480px;
+    min-height: unset;
+  }
   .map-sidebar {
     width: 100%;
     flex-direction: row;

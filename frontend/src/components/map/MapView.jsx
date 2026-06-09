@@ -29,13 +29,17 @@ function MapResizer() {
   const map = useMap();
   useEffect(() => {
     const invalidate = () => map.invalidateSize();
-    // One deferred call catches the initial layout settle on mount.
-    const t = setTimeout(invalidate, 200);
+    // Two deferred calls: 400ms catches the initial layout settle on mobile
+    // (fonts + stats bar paint after mount); 1200ms is a belt-and-suspenders
+    // pass for slow devices where CSS layout may still be in progress.
+    const t1 = setTimeout(invalidate, 400);
+    const t2 = setTimeout(invalidate, 1200);
     const ro = new ResizeObserver(invalidate);
     ro.observe(map.getContainer());
     window.addEventListener("orientationchange", invalidate);
     return () => {
-      clearTimeout(t);
+      clearTimeout(t1);
+      clearTimeout(t2);
       ro.disconnect();
       window.removeEventListener("orientationchange", invalidate);
     };

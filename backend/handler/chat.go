@@ -80,6 +80,13 @@ func Chat(c *gin.Context) {
 		return
 	}
 
+	clean, err := lib.ValidateUserInput(req.Message)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	req.Message = clean
+
 	userID := c.GetString("userID")
 	session, err := resolveSession(userID, req.SessionID, deriveTitle(req.Message))
 	if err != nil {
@@ -187,6 +194,13 @@ func CrisisChat(c *gin.Context) {
 		return
 	}
 
+	clean, err := lib.ValidateUserInput(req.Message)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	req.Message = clean
+
 	reply, err := lib.GenerateBrainyCrisisReply(crisis, req.History, req.Message)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
@@ -217,7 +231,15 @@ func CrisisChatPhoto(c *gin.Context) {
 		_ = json.Unmarshal([]byte(raw), &history)
 	}
 
-	reply, err := lib.GenerateBrainyCrisisPhotoReply(crisis, history, c.PostForm("caption"), dataURL)
+	caption := c.PostForm("caption")
+	if caption != "" {
+		if caption, err = lib.ValidateUserInput(caption); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+	}
+
+	reply, err := lib.GenerateBrainyCrisisPhotoReply(crisis, history, caption, dataURL)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return

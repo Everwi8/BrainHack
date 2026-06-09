@@ -177,6 +177,22 @@ func prepareGroupMessage(req postGroupChatReq, user *lib.User) (lib.GroupChatMes
 		return lib.GroupChatMessage{}, "message cannot be empty"
 	}
 
+	// Validate text fields that may reach the LLM (injection guard + length cap).
+	if req.MessageText != "" {
+		clean, verr := lib.ValidateUserInput(req.MessageText)
+		if verr != nil {
+			return lib.GroupChatMessage{}, verr.Error()
+		}
+		req.MessageText = clean
+	}
+	if req.Transcript != "" {
+		clean, verr := lib.ValidateUserInput(req.Transcript)
+		if verr != nil {
+			return lib.GroupChatMessage{}, verr.Error()
+		}
+		req.Transcript = clean
+	}
+
 	return lib.GroupChatMessage{
 		ID:           newGroupMessageID(),
 		SenderUserID: user.ID,

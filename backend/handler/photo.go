@@ -75,6 +75,13 @@ func ChatPhoto(c *gin.Context) {
 	dataURL := fmt.Sprintf("data:%s;base64,%s", mime, base64.StdEncoding.EncodeToString(data))
 
 	caption := c.PostForm("caption")
+	if caption != "" {
+		var verr error
+		if caption, verr = lib.ValidateUserInput(caption); verr != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": verr.Error()})
+			return
+		}
+	}
 	userID := c.GetString("userID")
 
 	// Persist the image to Supabase Storage so it survives reloads. Best-effort:
