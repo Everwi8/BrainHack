@@ -63,7 +63,9 @@ export default function CameraCapture({ onCapture, onClose, onUpload }) {
     <div
       onClick={onClose}
       style={{
-        position: "fixed", inset: 0, zIndex: 1000,
+        // Above the Crisis Detail Brainy drawer (zIndex 1401) — this is a
+        // top-level capture modal that must sit over everything.
+        position: "fixed", inset: 0, zIndex: 1600,
         background: "rgba(0,0,0,0.6)",
         display: "flex", alignItems: "center", justifyContent: "center", padding: 20,
       }}

@@ -66,6 +66,8 @@ func main() {
 		api.GET("/crises", handler.ListCrises)
 		api.GET("/crises/:id", handler.GetCrisis)
 		api.GET("/crises/:id/triage", handler.CrisisTriage) // triage + tasks for one crisis
+		api.POST("/crises/:id/chat", handler.CrisisChat)                              // crisis-grounded Brainy drawer chat
+		api.POST("/crises/:id/chat/photo", middleware.RequireAuth(), handler.CrisisChatPhoto) // crisis-grounded photo read (vision)
 
 		// Crisis reporting + approval (RBAC):
 		//   any authenticated user can file a report (coordinators' are auto-approved);
@@ -110,7 +112,8 @@ func main() {
 		api.GET("/data/dengue", handler.GetDengue)
 		api.GET("/hospitals", handler.GetHospitals)
 		api.GET("/feed", handler.GetFeed)
-		api.GET("/geocode/reverse", handler.ReverseGeocode) // lat/lng → readable address
+		api.GET("/geocode/reverse", handler.ReverseGeocode)   // lat/lng → readable address
+		api.GET("/resources/nearby", handler.NearbyResources) // OneMap civic resources near a point
 
 		// Jerald — map markers
 		api.GET("/map/markers", handler.MapMarkers)

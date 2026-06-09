@@ -5,10 +5,11 @@
 // endpoint isn't live yet (it's currently a stub). Reuses Perrin's chat UI
 // components so the look matches the main Chat page.
 //
-// ── API CONTRACT (for Perrin) ─────────────────────────────────────────────────
-//   POST /api/chat
-//   Request body:  { message: string, crisis_id: string, history: [{role,text}] }
+// ── API CONTRACT ──────────────────────────────────────────────────────────────
+//   POST /api/crises/:id/chat   (crisis-grounded, stateless)
+//   Request body:  { message: string, history: [{role,text}] }
 //   Response body: { reply: string }   (also accepts { text } or { message })
+//   Voice notes are transcribed via POST /api/voice then sent as text.
 // ──────────────────────────────────────────────────────────────────────────────
 
 import { useState, useRef, useEffect } from "react";
@@ -16,6 +17,9 @@ import { X } from "lucide-react";
 import BrainyMascot from "../BrainyMascot";
 import MessageBubble from "../chat/MessageBubble";
 import ChatInput from "../chat/ChatInput";
+import CameraCapture from "../chat/CameraCapture";
+import { api } from "../../lib/api";
+import { useVoiceRecorder, extensionFromMime } from "../../lib/useVoiceRecorder";
 
 function nowTime() {
   return new Date().toLocaleTimeString("en-SG", { hour: "2-digit", minute: "2-digit" });
@@ -51,7 +55,12 @@ export default function BrainyDrawer({ open, onClose, crisis }) {
   const [messages, setMessages] = useState([]);
   const [input, setInput] = useState("");
   const [isTyping, setIsTyping] = useState(false);
+  const [isTranscribing, setIsTranscribing] = useState(false);
+  const [pendingImage, setPendingImage] = useState(null); // { file, url }
+  const [cameraOpen, setCameraOpen] = useState(false);     // live webcam capture modal
+  const { isRecording, start: startRecording, stop: stopRecording } = useVoiceRecorder();
   const endRef = useRef(null);
+  const chatInputRef = useRef(null); // imperative handle to open the photo picker
 
   // Reset the greeting whenever the drawer opens for a (possibly different) crisis.
   useEffect(() => {
@@ -94,18 +103,95 @@ export default function BrainyDrawer({ open, onClose, crisis }) {
 
     let reply;
     try {
-      const apiUrl = import.meta.env.VITE_API_URL ?? "http://localhost:8080";
-      const res = await fetch(`${apiUrl}/api/chat`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ message: trimmed, crisis_id: crisis.id, history }),
-      });
-      if (!res.ok) throw new Error(`status ${res.status}`);
-      const data = await res.json();
+      const data = await api.post(`/api/crises/${crisis.id}/chat`, { message: trimmed, history });
       reply = data.reply ?? data.text ?? data.message;
-      if (!reply) throw new Error("empty reply"); // stub returns nothing → fall back
+      if (!reply) throw new Error("empty reply");
     } catch {
-      reply = localReply(trimmed, crisis); // backend not ready — graceful fallback
+      reply = localReply(trimmed, crisis); // backend/LLM unavailable — graceful fallback
+    }
+
+    setMessages((prev) => [...prev, { id: Date.now() + 1, role: "bot", text: reply, timestamp: nowTime() }]);
+    setIsTyping(false);
+  }
+
+  // handleMic toggles voice capture: tap to record, tap again to stop, then the
+  // clip is transcribed (POST /api/voice) and the transcript flows through the
+  // normal send path so Brainy answers as if it were typed.
+  async function handleMic() {
+    if (isTyping || isTranscribing) return;
+
+    if (!isRecording) {
+      const err = await startRecording();
+      if (err) {
+        setMessages((prev) => [...prev, { id: Date.now(), role: "bot", text: err, timestamp: nowTime() }]);
+      }
+      return;
+    }
+
+    const clip = await stopRecording();
+    if (!clip) return;
+
+    setIsTranscribing(true);
+    try {
+      const form = new FormData();
+      form.append("audio", clip.blob, `voice-note.${extensionFromMime(clip.mimeType)}`);
+      const data = await api.postForm("/api/voice", form);
+      const transcript = (data.transcript ?? "").trim();
+      if (transcript) {
+        sendMessage(transcript);
+      } else {
+        setMessages((prev) => [...prev, {
+          id: Date.now(), role: "bot", timestamp: nowTime(),
+          text: "I couldn't make out any speech in that recording — mind trying again?",
+        }]);
+      }
+    } catch (err) {
+      setMessages((prev) => [...prev, {
+        id: Date.now(), role: "bot", timestamp: nowTime(),
+        text: `Sorry, I couldn't transcribe that. ${err.message}`,
+      }]);
+    } finally {
+      setIsTranscribing(false);
+    }
+  }
+
+  // Stage a chosen/captured image for sending (with an optional caption typed
+  // into the input). Replacing an un-sent preview frees the old object URL.
+  function handlePickImage(file) {
+    if (pendingImage?.url) URL.revokeObjectURL(pendingImage.url);
+    setPendingImage({ file, url: URL.createObjectURL(file) });
+  }
+
+  function cancelPhoto() {
+    if (pendingImage?.url) URL.revokeObjectURL(pendingImage.url);
+    setPendingImage(null);
+  }
+
+  // sendPhoto uploads the staged image to the crisis-grounded vision endpoint so
+  // Brainy reads it in the context of THIS crisis.
+  async function sendPhoto() {
+    if (!pendingImage || isTyping) return;
+
+    const caption = input.trim();
+    const { file, url } = pendingImage;
+    const history = messages.map((mm) => ({ role: mm.role, text: mm.text }));
+
+    setMessages((prev) => [...prev, { id: Date.now(), role: "user", text: caption, imageUrl: url, timestamp: nowTime() }]);
+    setInput("");
+    setPendingImage(null); // the object URL is now owned by the message above
+    setIsTyping(true);
+
+    let reply;
+    try {
+      const form = new FormData();
+      form.append("image", file);
+      if (caption) form.append("caption", caption);
+      form.append("history", JSON.stringify(history));
+      const data = await api.postForm(`/api/crises/${crisis.id}/chat/photo`, form);
+      reply = data.reply ?? data.text ?? data.message;
+      if (!reply) throw new Error("empty reply");
+    } catch (err) {
+      reply = `Sorry, I couldn't analyse that photo. ${err.message}`;
     }
 
     setMessages((prev) => [...prev, { id: Date.now() + 1, role: "bot", text: reply, timestamp: nowTime() }]);
@@ -174,7 +260,15 @@ export default function BrainyDrawer({ open, onClose, crisis }) {
         {/* Messages */}
         <div style={{ flex: 1, overflowY: "auto", padding: "16px 14px 6px" }}>
           {messages.map((msg) => (
-            <MessageBubble key={msg.id} role={msg.role} text={msg.text} timestamp={msg.timestamp} />
+            <MessageBubble key={msg.id} role={msg.role} text={msg.text} timestamp={msg.timestamp}>
+              {msg.imageUrl && (
+                <img
+                  src={msg.imageUrl}
+                  alt="Shared photo"
+                  style={{ maxWidth: "100%", borderRadius: 12, marginTop: msg.text ? 8 : 0, display: "block" }}
+                />
+              )}
+            </MessageBubble>
           ))}
           {isTyping && (
             <div style={{ fontSize: 12.5, color: "#9CA3AF", fontWeight: 700, margin: "2px 0 14px 44px" }}>
@@ -186,14 +280,57 @@ export default function BrainyDrawer({ open, onClose, crisis }) {
 
         {/* Input */}
         <div style={{ padding: "10px 14px 16px", flexShrink: 0 }}>
+          {/* Pending photo preview */}
+          {pendingImage && (
+            <div style={{
+              display: "flex", alignItems: "center", gap: 12,
+              background: "#fff", borderRadius: 16, padding: 10, marginBottom: 10,
+              boxShadow: "0 2px 8px rgba(0,0,0,0.08)",
+            }}>
+              <img
+                src={pendingImage.url}
+                alt="Preview"
+                style={{ width: 56, height: 56, objectFit: "cover", borderRadius: 10, flexShrink: 0 }}
+              />
+              <div style={{ flex: 1, fontSize: 13, color: "#6B7280", fontWeight: 600 }}>
+                Photo ready to send. Add an optional note, then tap send.
+              </div>
+              <button
+                onClick={cancelPhoto}
+                disabled={isTyping}
+                title="Remove photo"
+                style={{
+                  background: "none", border: "none", cursor: isTyping ? "not-allowed" : "pointer",
+                  padding: 6, borderRadius: 8, display: "flex", flexShrink: 0,
+                }}
+              >
+                <X size={18} color="#6B7280" />
+              </button>
+            </div>
+          )}
+
           <ChatInput
+            ref={chatInputRef}
             value={input}
             onChange={(e) => setInput(e.target.value)}
-            onSend={() => sendMessage()}
-            disabled={isTyping}
+            onSend={() => (pendingImage ? sendPhoto() : sendMessage())}
+            onPickImage={handlePickImage}
+            onTakePhoto={() => setCameraOpen(true)}
+            onMic={handleMic}
+            recording={isRecording}
+            transcribing={isTranscribing}
+            disabled={isTyping || isTranscribing}
           />
         </div>
       </aside>
+
+      {cameraOpen && (
+        <CameraCapture
+          onCapture={(file) => { handlePickImage(file); setCameraOpen(false); }}
+          onClose={() => setCameraOpen(false)}
+          onUpload={() => { setCameraOpen(false); chatInputRef.current?.openUpload(); }}
+        />
+      )}
     </>
   );
 }

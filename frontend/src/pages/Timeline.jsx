@@ -135,11 +135,40 @@ const MOCK_FEED = [
   },
 ];
 
-const TRENDING = [
-  { category: "Crisis · Trending", title: "Orchard Road Floods", sub: "12.4K People affected" },
-  { category: "Weather · Live", title: "Haze in North-East", sub: "Trending with #SGWeather" },
-  { category: "Industrial · Trending", title: "Gas Leak at Jurong Industrial Estate", sub: "SCDF HazMat teams deployed" },
-];
+// fmtDist renders a metre distance as a friendly "320 m" / "1.2 km".
+function fmtDist(m) {
+  if (m == null) return "";
+  return m < 1000 ? `${m} m` : `${(m / 1000).toFixed(1)} km`;
+}
+
+// nearbyRows turns the /api/resources/nearby payload into the panel's
+// category/title/sub rows, skipping any resource OneMap didn't return.
+function nearbyRows(n) {
+  if (!n) return [];
+  const rows = [];
+  if (n.shelter) {
+    rows.push({
+      category: "Civil Defence Shelter · Near you",
+      title: n.shelter.name || n.shelter.address || "Public shelter",
+      sub: `${fmtDist(n.shelter.distanceM)} away`,
+    });
+  }
+  if (n.hospital) {
+    rows.push({
+      category: "Hospital · Near you",
+      title: n.hospital.name,
+      sub: `${fmtDist(n.hospital.distanceM)} away`,
+    });
+  }
+  if (n.aed) {
+    rows.push({
+      category: "Public Access AED · Near you",
+      title: `Nearest AED · ${fmtDist(n.aed.nearestM)}`,
+      sub: `${n.aed.count.toLocaleString()} within 5 km`,
+    });
+  }
+  return rows;
+}
 
 const EMERGENCY = [
   { label: "Police", number: "999" },
@@ -291,6 +320,27 @@ export default function Timeline() {
   const [failed, setFailed] = useState(false);
   const [resolvingId, setResolvingId] = useState(null);
 
+  // "Near you" panel — civic resources (shelter / hospital / AEDs) from OneMap,
+  // keyed to the user's location. Best-effort: stays null if geolocation is
+  // denied or OneMap is unconfigured, and the panel then hides itself.
+  const [nearby, setNearby] = useState(null);
+
+  useEffect(() => {
+    const load = (lat, lng) =>
+      api.get(`/api/resources/nearby?lat=${lat}&lng=${lng}`)
+        .then(setNearby)
+        .catch((err) => console.error("load nearby resources:", err));
+
+    // Resolve the user's location, falling back to Singapore centre when
+    // geolocation is denied/unavailable so the panel still shows useful data.
+    if (!navigator.geolocation) { load(1.3521, 103.8198); return; }
+    navigator.geolocation.getCurrentPosition(
+      (pos) => load(pos.coords.latitude, pos.coords.longitude),
+      (err) => { console.warn("geolocation unavailable:", err.message); load(1.3521, 103.8198); },
+      { enableHighAccuracy: false, timeout: 8000, maximumAge: 300000 }
+    );
+  }, []);
+
   const loadFeed = useCallback(() => {
     return api.get("/api/feed")
       .then((d) => setFeed(Array.isArray(d?.items) ? d.items.map(toCard) : []))
@@ -417,29 +467,31 @@ export default function Timeline() {
 
         {/* Right panel */}
         <div className="timeline-right">
-          {/* What's happening */}
-          <div style={{
-            background: "#fff", borderRadius: 16,
-            padding: "20px", boxShadow: "0 1px 4px rgba(0,0,0,0.07)",
-          }}>
-            <h3 style={{ margin: "0 0 16px", fontSize: 16, fontWeight: 800, color: "#1a1a2e", display: "flex", alignItems: "center", gap: 8 }}>
-              <Zap size={16} color="#1a1a2e" /> What's happening
-            </h3>
-            {TRENDING.map((t, i) => (
-              <div key={i} style={{ marginBottom: i < TRENDING.length - 1 ? 16 : 0 }}>
-                <span style={{ fontSize: 11, color: "#aaa" }}>{t.category}</span>
-                <p style={{ margin: "2px 0 2px", fontWeight: 800, fontSize: 14, color: "#1a1a2e" }}>{t.title}</p>
-                <span style={{ fontSize: 12, color: "#aaa" }}>{t.sub}</span>
+          {/* Near you — civic resources from OneMap (renders only when located) */}
+          {(() => {
+            const rows = nearbyRows(nearby);
+            if (rows.length === 0) return null;
+            return (
+              <div style={{
+                background: "#fff", borderRadius: 16,
+                padding: "20px", boxShadow: "0 1px 4px rgba(0,0,0,0.07)",
+              }}>
+                <h3 style={{ margin: "0 0 16px", fontSize: 16, fontWeight: 800, color: "#1a1a2e", display: "flex", alignItems: "center", gap: 8 }}>
+                  <MapPin size={16} color="#1a1a2e" /> Near you
+                </h3>
+                {rows.map((t, i) => (
+                  <div key={i} style={{ marginBottom: i < rows.length - 1 ? 16 : 0 }}>
+                    <span style={{ fontSize: 11, color: "#aaa" }}>{t.category}</span>
+                    <p style={{ margin: "2px 0 2px", fontWeight: 800, fontSize: 14, color: "#1a1a2e" }}>{t.title}</p>
+                    <span style={{ fontSize: 12, color: "#aaa" }}>{t.sub}</span>
+                  </div>
+                ))}
+                <span style={{ display: "block", marginTop: 16, fontSize: 11, color: "#bbb" }}>
+                  Source: OneMap · SCDF / MOH
+                </span>
               </div>
-            ))}
-            <button style={{
-              marginTop: 16, background: "none", border: "none",
-              color: "#F59E0B", fontFamily: "'Nunito', sans-serif",
-              fontWeight: 700, fontSize: 13, cursor: "pointer", padding: 0,
-            }}>
-              Show more
-            </button>
-          </div>
+            );
+          })()}
 
           {/* Emergency help */}
           <div style={{

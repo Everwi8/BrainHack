@@ -3,6 +3,7 @@
 package handler
 
 import (
+	"encoding/json"
 	"net/http"
 	"strings"
 
@@ -107,6 +108,68 @@ func Chat(c *gin.Context) {
 		"session_id": session.ID,
 		"title":      title,
 	})
+}
+
+// crisisChatReq is the Crisis Detail drawer's payload: a question plus the
+// recent on-screen conversation for continuity. Stateless — not persisted.
+type crisisChatReq struct {
+	Message string             `json:"message" binding:"required"`
+	History []lib.ChatTurnLite `json:"history"`
+}
+
+// CrisisChat answers a question on a specific crisis's detail page, grounded in
+// that crisis's data, sensors, volunteer tasks and the live triage snapshot.
+// Public (the crisis detail page is a public read) and stateless.
+func CrisisChat(c *gin.Context) {
+	id := c.Param("id")
+	crisis, err := lib.DB.GetCrisisByID(id)
+	if err != nil || crisis == nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "crisis not found"})
+		return
+	}
+
+	var req crisisChatReq
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	reply, err := lib.GenerateBrainyCrisisReply(crisis, req.History, req.Message)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"reply": reply})
+}
+
+// CrisisChatPhoto answers a photo sent in the Crisis Detail drawer, grounded in
+// that crisis. Multipart: image (required), caption, history (JSON string).
+// Auth-gated (vision is costly); stateless — nothing is persisted.
+func CrisisChatPhoto(c *gin.Context) {
+	id := c.Param("id")
+	crisis, err := lib.DB.GetCrisisByID(id)
+	if err != nil || crisis == nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "crisis not found"})
+		return
+	}
+
+	dataURL, ok := readImageDataURL(c)
+	if !ok {
+		return // readImageDataURL already wrote the error
+	}
+
+	// History arrives as a JSON-encoded string (multipart can't nest arrays).
+	var history []lib.ChatTurnLite
+	if raw := c.PostForm("history"); raw != "" {
+		_ = json.Unmarshal([]byte(raw), &history)
+	}
+
+	reply, err := lib.GenerateBrainyCrisisPhotoReply(crisis, history, c.PostForm("caption"), dataURL)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"reply": reply})
 }
 
 // ListChatSessions returns the authenticated user's conversations (no transcripts).

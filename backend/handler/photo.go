@@ -19,39 +19,59 @@ import (
 // maxPhotoBytes caps upload size to keep base64 payloads within model limits.
 const maxPhotoBytes = 8 << 20 // 8 MB
 
-func ChatPhoto(c *gin.Context) {
+// readImageData reads, size-limits and MIME-sniffs the multipart "image" field,
+// returning the raw bytes and detected MIME. On any problem it writes the error
+// response and returns ok=false so the caller can simply return.
+func readImageData(c *gin.Context) (data []byte, mime string, ok bool) {
 	fileHeader, err := c.FormFile("image")
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "image file is required (multipart field 'image')"})
-		return
+		return nil, "", false
 	}
 	if fileHeader.Size > maxPhotoBytes {
 		c.JSON(http.StatusRequestEntityTooLarge, gin.H{"error": "image too large (max 8 MB)"})
-		return
+		return nil, "", false
 	}
 
 	f, err := fileHeader.Open()
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "could not read uploaded image"})
-		return
+		return nil, "", false
 	}
 	defer f.Close()
 
-	data, err := io.ReadAll(io.LimitReader(f, maxPhotoBytes))
+	data, err = io.ReadAll(io.LimitReader(f, maxPhotoBytes))
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "could not read uploaded image"})
-		return
+		return nil, "", false
 	}
 
 	// Sniff the actual bytes rather than trusting the client-supplied
 	// Content-Type, so the data URL's MIME matches the real image format and
 	// mislabelled (or non-image) uploads are rejected before hitting the model.
-	mime := http.DetectContentType(data)
+	mime = http.DetectContentType(data)
 	if !strings.HasPrefix(mime, "image/") {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "uploaded file is not a recognised image"})
+		return nil, "", false
+	}
+	return data, mime, true
+}
+
+// readImageDataURL is readImageData plus base64 data-URL encoding, for callers
+// that only need the model-ready data URL (e.g. the stateless crisis drawer).
+func readImageDataURL(c *gin.Context) (string, bool) {
+	data, mime, ok := readImageData(c)
+	if !ok {
+		return "", false
+	}
+	return fmt.Sprintf("data:%s;base64,%s", mime, base64.StdEncoding.EncodeToString(data)), true
+}
+
+func ChatPhoto(c *gin.Context) {
+	data, mime, ok := readImageData(c)
+	if !ok {
 		return
 	}
-
 	dataURL := fmt.Sprintf("data:%s;base64,%s", mime, base64.StdEncoding.EncodeToString(data))
 
 	caption := c.PostForm("caption")

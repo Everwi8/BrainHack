@@ -23,6 +23,7 @@ import (
 const (
 	onemapTokenURL    = "https://www.onemap.gov.sg/api/auth/post/getToken"
 	onemapRevgeoURL   = "https://www.onemap.gov.sg/api/public/revgeocode"
+	onemapThemeURL    = "https://www.onemap.gov.sg/api/public/themesvc/retrieveTheme"
 	onemapTokenMargin = 1 * time.Hour // refresh this long before expiry
 )
 
@@ -135,6 +136,87 @@ func ReverseGeocode(lat, lng float64) string {
 	default:
 		return ""
 	}
+}
+
+// ThemePoint is one feature in a OneMap thematic layer (a POI such as an AED or
+// a public shelter). Only the fields we surface in the UI are kept.
+type ThemePoint struct {
+	Name        string  `json:"name"`
+	Description string  `json:"description"`
+	Address     string  `json:"address"`
+	Lat         float64 `json:"lat"`
+	Lng         float64 `json:"lng"`
+}
+
+// RetrieveTheme returns every point of a OneMap theme (queryName, e.g.
+// "aed_locations") whose location falls inside the lat/lng bounding box. It
+// returns nil — never an error — when OneMap is unconfigured or the call fails,
+// so callers degrade quietly just like ReverseGeocode.
+func RetrieveTheme(queryName string, latMin, lngMin, latMax, lngMax float64) []ThemePoint {
+	token := onemapToken()
+	if token == "" {
+		return nil
+	}
+
+	q := url.Values{}
+	q.Set("queryName", queryName)
+	// OneMap expects extents as lat_min,lng_min,lat_max,lng_max.
+	q.Set("extents", fmt.Sprintf("%f,%f,%f,%f", latMin, lngMin, latMax, lngMax))
+
+	req, _ := http.NewRequest("GET", onemapThemeURL+"?"+q.Encode(), nil)
+	req.Header.Set("Authorization", token)
+
+	resp, err := onemapHTTP.Do(req)
+	if err != nil {
+		return nil
+	}
+	defer resp.Body.Close()
+	raw, _ := io.ReadAll(resp.Body)
+
+	var out struct {
+		SrchResults []map[string]interface{} `json:"SrchResults"`
+	}
+	// SrchResults[0] is theme metadata (FeatCount, owner, …); the rest are POIs.
+	if err := json.Unmarshal(raw, &out); err != nil || len(out.SrchResults) < 2 {
+		return nil
+	}
+
+	points := make([]ThemePoint, 0, len(out.SrchResults)-1)
+	for _, m := range out.SrchResults[1:] {
+		lat, lng, ok := parseLatLngPair(omString(m["LatLng"]))
+		if !ok {
+			continue
+		}
+		points = append(points, ThemePoint{
+			Name:        titleCaseWords(omString(m["NAME"])),
+			Description: omString(m["DESCRIPTION"]),
+			Address:     titleCaseWords(omString(m["ADDRESSSTREETNAME"])),
+			Lat:         lat,
+			Lng:         lng,
+		})
+	}
+	return points
+}
+
+// omString coerces an interface{} from the decoded JSON map to a trimmed string.
+func omString(v interface{}) string {
+	s, _ := v.(string)
+	return strings.TrimSpace(s)
+}
+
+// parseLatLngPair splits OneMap's "lat,lng" string into two floats.
+func parseLatLngPair(s string) (lat, lng float64, ok bool) {
+	parts := strings.SplitN(s, ",", 2)
+	if len(parts) != 2 {
+		return 0, 0, false
+	}
+	if _, err := fmt.Sscan(strings.TrimSpace(parts[0]), &lat); err != nil {
+		return 0, 0, false
+	}
+	if _, err := fmt.Sscan(strings.TrimSpace(parts[1]), &lng); err != nil {
+		return 0, 0, false
+	}
+	return lat, lng, true
 }
 
 // cleanOneMapField normalises OneMap's placeholder values ("NIL"/empty) to "".
