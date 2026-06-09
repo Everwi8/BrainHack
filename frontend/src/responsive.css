@@ -279,8 +279,19 @@
   align-items: flex-start;
 }
 
-/* Desktop: map area takes a fixed height so height:100% inside resolves correctly */
+/* Desktop: flex:1 was previously inline on .map-area; moved here so the
+   mobile override (flex:none) can win without needing !important. */
 .map-area {
+  flex: 1;
+}
+
+/* All three levels need min-height so the height:100% chain produces a
+   visible map. height:100% resolves to auto when the parent only has
+   min-height (not explicit height), so each level independently enforces
+   its own minimum. */
+.map-area,
+.map-area > div,
+.map-area .leaflet-container {
   min-height: 580px;
 }
 
@@ -304,8 +315,14 @@
     flex-direction: column;
     padding: 0 12px 20px;
   }
-  /* Give the entire Leaflet height chain a concrete pixel value on mobile.
-     inline minHeight has been removed from the JSX so CSS owns this cleanly. */
+  /* On mobile the flex container switches to column, which makes flex-basis
+     the height axis. The inline flex:1 on .map-area sets flex-basis:0 and
+     overrides height:480px. flex:none switches to flex-basis:auto so CSS
+     height takes effect; align-self:stretch fills the cross-axis width. */
+  .map-area {
+    flex: none;
+    align-self: stretch;
+  }
   .map-area,
   .map-area > div,
   .map-area .leaflet-container {

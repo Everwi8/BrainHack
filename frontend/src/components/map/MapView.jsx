@@ -50,13 +50,22 @@ function MapResizer() {
 // RecenterOnUser pans/zooms to the user's resolved position the first time it
 // arrives, so the "Your location" pin is guaranteed to be in view (otherwise it
 // can sit off-screen and look like no pin appeared at all). Fires once.
+// The flyTo is delayed past MapResizer's invalidateSize (400ms) so Leaflet has
+// a valid container size before the animation math runs — calling flyTo on a
+// zero-size container produces NaN coordinates and crashes the render tree.
 function RecenterOnUser({ pos }) {
   const map = useMap();
   const done = useRef(false);
   useEffect(() => {
     if (pos && !done.current) {
       done.current = true;
-      map.flyTo(pos, 14, { duration: 1 });
+      const t = setTimeout(() => {
+        try {
+          const { x, y } = map.getSize();
+          if (x > 0 && y > 0) map.flyTo(pos, 14, { duration: 1 });
+        } catch (_) {}
+      }, 500);
+      return () => clearTimeout(t);
     }
   }, [pos, map]);
   return null;
