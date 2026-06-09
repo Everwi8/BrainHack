@@ -299,12 +299,15 @@
     flex-direction: column;
     padding: 0 12px 20px;
   }
-  /* Explicit height so Leaflet's container has a real size at init time.
-     height:100% alone fails here because the column-flex parent has no
-     defined height — only minHeight, which percentage children can't inherit. */
-  .map-area {
-    height: 480px;
-    min-height: unset;
+  /* Force an explicit height on the entire Leaflet stack so tiles render.
+     height:100% requires an ancestor with a defined height (not min-height).
+     !important overrides the inline minHeight:580 on the wrapper and the
+     react-leaflet inline style on .leaflet-container. */
+  .map-area,
+  .map-area > div,
+  .map-area .leaflet-container {
+    height: 480px !important;
+    min-height: unset !important;
   }
   .map-sidebar {
     width: 100%;
