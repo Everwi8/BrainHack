@@ -66,7 +66,11 @@ export default function Navbar() {
 
         {/* Right icons + hamburger */}
         <div className="navbar-right">
-          <div style={{ position: "relative", cursor: "pointer" }}>
+          <div
+            onClick={() => handleNav("/timeline")}
+            title="Alerts & feed"
+            style={{ position: "relative", cursor: "pointer" }}
+          >
             <div style={{
               width: 38, height: 38, borderRadius: "50%",
               background: "#FEF3C7", display: "flex", alignItems: "center", justifyContent: "center",
@@ -75,7 +79,11 @@ export default function Navbar() {
             </div>
             <div style={{ position: "absolute", top: 6, right: 6, width: 8, height: 8, borderRadius: "50%", background: "#EF4444" }} />
           </div>
-          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          <div
+            onClick={() => handleNav("/profile")}
+            title="Profile & settings"
+            style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer" }}
+          >
             <div style={{
               width: 38, height: 38, borderRadius: "50%",
               background: "#e0d5c5", display: "flex", alignItems: "center", justifyContent: "center",

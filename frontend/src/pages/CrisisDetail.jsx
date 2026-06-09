@@ -383,6 +383,11 @@ export default function CrisisDetail() {
   // Task membership for the join/confirm flow. myTaskId is the task (in THIS
   // crisis) the user has already joined — non-coordinators may hold only one.
   const [myTaskId, setMyTaskId] = useState(null);
+  // A task the user holds in a DIFFERENT crisis. Volunteers may hold only one
+  // task at a time (globally), so this drives the "you can only join one" notice.
+  const [otherTask, setOtherTask] = useState(null); // { id, title, crisis_title } | null
+  const [toast, setToast] = useState("");            // transient bottom notification
+  const toastTimer = useRef(null);
   const [confirmingId, setConfirmingId] = useState(null); // card showing Confirm
   const [leavingId, setLeavingId] = useState(null);       // card showing Confirm leave
   const [joiningId, setJoiningId] = useState(null);       // in-flight join/leave
@@ -406,21 +411,43 @@ export default function CrisisDetail() {
     api.get("/api/tasks/mine")
       .then((rows) => {
         if (cancelled) return;
-        const mine = (Array.isArray(rows) ? rows : []).find((t) => t.crisis_id === id);
+        const list = Array.isArray(rows) ? rows : [];
+        const mine = list.find((t) => t.crisis_id === id);
         setMyTaskId(mine ? mine.id : null);
+        // A task in any other crisis blocks joining here (one task at a time).
+        const elsewhere = list.find((t) => t.crisis_id !== id);
+        setOtherTask(elsewhere
+          ? { id: elsewhere.id, title: elsewhere.title, crisis_title: elsewhere.crisis_title }
+          : null);
       })
       .catch(() => {});
     return () => { cancelled = true; };
   }, [id]);
 
+  // showToast surfaces a transient notification (auto-dismisses after 5s).
+  const showToast = (msg) => {
+    setToast(msg);
+    if (toastTimer.current) clearTimeout(toastTimer.current);
+    toastTimer.current = setTimeout(() => setToast(""), 5000);
+  };
+  useEffect(() => () => { if (toastTimer.current) clearTimeout(toastTimer.current); }, []);
+
   const tasksRef = useRef(null);
   const openTaskChat = (taskId) => navigate(`/volunteers?task_id=${taskId}`);
 
   // The big "I want to help" CTA: open the user's task chat if they've joined one
-  // here, otherwise scroll them to the task list to pick one (joining is gated to
-  // those cards).
+  // here; if they're already on a task in another crisis, tell them they can only
+  // hold one at a time; otherwise scroll them to the task list to pick one.
   const goHelp = () => {
     if (myTaskId) { openTaskChat(myTaskId); return; }
+    if (otherTask) {
+      showToast(
+        `You can only join one task at a time. You're currently on “${otherTask.title}”` +
+        `${otherTask.crisis_title ? ` for ${otherTask.crisis_title}` : ""}. Leave it first to join another.`,
+      );
+      tasksRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+      return;
+    }
     tasksRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
   };
 
@@ -617,6 +644,25 @@ export default function CrisisDetail() {
   return (
     <div style={{ minHeight: "100vh", background: CREAM, fontFamily: "'Nunito', sans-serif", color: INK }}>
       <Navbar />
+
+      {/* Transient notification (e.g. one-task-at-a-time notice) */}
+      {toast && (
+        <div style={{
+          position: "fixed", top: 78, left: "50%", transform: "translateX(-50%)",
+          zIndex: 2000, maxWidth: 460, width: "calc(100% - 32px)",
+          background: "#1a1a2e", color: "#fff", borderRadius: 12,
+          padding: "12px 16px", boxShadow: "0 8px 28px rgba(0,0,0,0.28)",
+          display: "flex", alignItems: "flex-start", gap: 10,
+          fontSize: 13.5, fontWeight: 600, lineHeight: 1.45,
+        }}>
+          <AlertTriangle size={18} color="#FBBF24" style={{ flexShrink: 0, marginTop: 1 }} />
+          <span style={{ flex: 1 }}>{toast}</span>
+          <button onClick={() => setToast("")} style={{
+            background: "none", border: "none", color: "#9CA3AF", cursor: "pointer",
+            fontSize: 16, lineHeight: 1, padding: 0,
+          }}>✕</button>
+        </div>
+      )}
 
       <div className="crisis-page-inner">
 

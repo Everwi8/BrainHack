@@ -124,7 +124,7 @@ and some are gated to the `coordinator` role.
 
 | Area | Routes |
 | --- | --- |
-| Auth | `POST /auth/register`, `POST /auth/login` → `{ token }` |
+| Auth | `POST /auth/register`, `POST /auth/login` → `{ token }`; `GET/PATCH /auth/me` (own profile: edit name / password) |
 | Crises (read) | `GET /crises`, `GET /crises/:id`, `GET /crises/:id/triage` |
 | Crises (report) | `POST /crises`, `PATCH /crises/:id`, `GET /crises/mine` |
 | Crises (coordinator) | `GET /crises/pending`, `POST /crises/:id/{approve,reject,resolve}` |
@@ -153,7 +153,7 @@ backend/
 └── db/                  schema.sql, migrations/, seeds/
 
 frontend/src/
-├── pages/               Home, Map, CrisisDetail, Tasks, Chat, Volunteers, ReportCrisis, …
+├── pages/               Home, Map, CrisisDetail, Tasks, Chat, Volunteers, ReportCrisis, Profile, …
 ├── components/          chat/, crisis/, map/, volunteer/, feed/, layout/
 └── lib/                 api.js, auth.js, AuthProvider.jsx, useVoiceRecorder.js
 ```
@@ -177,4 +177,7 @@ frontend/src/
 - Volunteer slots are finite: joining a task decrements its `volunteers_needed`,
   leaving restores it, and at 0 the card shows "Fully staffed" and blocks new
   joins (coordinators are exempt — they oversee rather than fill a slot).
+- Residents/volunteers may hold **one task at a time** across all crises: joining
+  a second returns `409` with the current task id, and the UI offers
+  leave-and-switch (coordinators are unlimited).
 - Icons come from [`lucide-react`](https://lucide.dev) — already installed.

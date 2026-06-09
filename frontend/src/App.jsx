@@ -11,6 +11,7 @@ import Tasks from "./pages/Tasks";
 import Timeline from "./pages/Timeline";
 import Volunteers from "./pages/Volunteers";
 import ReportCrisis from "./pages/ReportCrisis";
+import Profile from "./pages/Profile";
 
 // Protected gates a route behind a valid session, redirecting to /login.
 function Protected({ children }) {
@@ -34,6 +35,7 @@ export default function App() {
           <Route path="/timeline" element={<Protected><Timeline /></Protected>} />
           <Route path="/volunteers" element={<Protected><Volunteers /></Protected>} />
           <Route path="/report" element={<Protected><ReportCrisis /></Protected>} />
+          <Route path="/profile" element={<Protected><Profile /></Protected>} />
         </Routes>
       </BrowserRouter>
     </AuthProvider>

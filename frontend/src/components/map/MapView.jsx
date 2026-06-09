@@ -1,7 +1,13 @@
+import { useEffect, useRef } from "react";
 import L from "leaflet";
-import { MapContainer, TileLayer, CircleMarker, Tooltip } from "react-leaflet";
+import { MapContainer, TileLayer, CircleMarker, Tooltip, useMap } from "react-leaflet";
 import MarkerClusterGroup from "react-leaflet-cluster";
+import { LocateFixed } from "lucide-react";
 import CrisisMarker from "./CrisisMarker";
+
+// User-location marker colour — a distinct violet so it doesn't blend into the
+// hospital (blue) or shelter (green) markers. Shared by the pin and the legend.
+const YOU_COLOR = "#7C3AED";
 
 // Leaflet's default PNG marker icons have a broken path in Vite/webpack builds
 // because the bundler moves asset files. This block patches Leaflet to use
@@ -12,6 +18,45 @@ L.Icon.Default.mergeOptions({
   iconUrl:       "https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon.png",
   shadowUrl:     "https://unpkg.com/leaflet@1.9.4/dist/images/marker-shadow.png",
 });
+
+// MapResizer fixes the blank/grey map on mobile. Leaflet measures and caches the
+// container size when the map initialises, but on small screens the map area is
+// laid out (the .map-body flex column, fonts, the stats bar) *after* the map has
+// already mounted — so Leaflet keeps a stale size and never paints the tiles.
+// A ResizeObserver tells Leaflet to re-measure once the layout settles and on
+// every subsequent resize; orientationchange covers phone rotation.
+function MapResizer() {
+  const map = useMap();
+  useEffect(() => {
+    const invalidate = () => map.invalidateSize();
+    // One deferred call catches the initial layout settle on mount.
+    const t = setTimeout(invalidate, 200);
+    const ro = new ResizeObserver(invalidate);
+    ro.observe(map.getContainer());
+    window.addEventListener("orientationchange", invalidate);
+    return () => {
+      clearTimeout(t);
+      ro.disconnect();
+      window.removeEventListener("orientationchange", invalidate);
+    };
+  }, [map]);
+  return null;
+}
+
+// RecenterOnUser pans/zooms to the user's resolved position the first time it
+// arrives, so the "Your location" pin is guaranteed to be in view (otherwise it
+// can sit off-screen and look like no pin appeared at all). Fires once.
+function RecenterOnUser({ pos }) {
+  const map = useMap();
+  const done = useRef(false);
+  useEffect(() => {
+    if (pos && !done.current) {
+      done.current = true;
+      map.flyTo(pos, 14, { duration: 1 });
+    }
+  }, [pos, map]);
+  return null;
+}
 
 // A small helper that renders one row of the map legend
 function LegendRow({ color, label }) {
@@ -33,6 +78,19 @@ function LegendRow({ color, label }) {
 // When the user unchecks "Shelters", Map.jsx passes an empty [] here,
 // so MapView doesn't need to know about filter state at all — clean separation.
 export default function MapView({ crisis = [], shelters = [], hospitals = [], userPos, loading, onCrisisSelect }) {
+  // Ref to the Leaflet map instance so the "Find me" overlay button (which lives
+  // outside the MapContainer's React tree) can pan the map.
+  const mapRef = useRef(null);
+
+  // Recenter on the user. Uses the resolved position when we have it, otherwise
+  // asks Leaflet to actively locate via the browser.
+  const findMe = () => {
+    const map = mapRef.current;
+    if (!map) return;
+    if (userPos) map.flyTo(userPos, 16, { duration: 1 });
+    else map.locate({ setView: true, maxZoom: 16 });
+  };
+
   return (
     // Outer wrapper is position:relative so the legend overlay and
     // loading spinner can sit on top of the map using position:absolute.
@@ -59,11 +117,17 @@ export default function MapView({ crisis = [], shelters = [], hospitals = [], us
         - Must have a defined height — Leaflet won't render in a zero-height div
       */}
       <MapContainer
+        ref={mapRef}
         center={[1.3521, 103.8198]}
         zoom={12}
         style={{ height: "100%", minHeight: 580, width: "100%", borderRadius: 16 }}
         zoomControl
       >
+        {/* Keeps Leaflet's cached size in sync with the real container size —
+            without this the map renders blank on mobile (see MapResizer above). */}
+        <MapResizer />
+        <RecenterOnUser pos={userPos} />
+
         {/*
           TileLayer loads the map background images (tiles).
           Tiles are small 256×256 PNG images named by zoom/x/y.
@@ -128,12 +192,13 @@ export default function MapView({ crisis = [], shelters = [], hospitals = [], us
           </CircleMarker>
         ))}
 
-        {/* User's own location — blue dot with white ring */}
+        {/* User's own location — violet dot with white ring (distinct from the
+            blue hospital / green shelter markers) */}
         {userPos && (
           <CircleMarker
             center={userPos}
             radius={9}
-            pathOptions={{ color: "#fff", weight: 3, fillColor: "#3B82F6", fillOpacity: 1 }}
+            pathOptions={{ color: "#fff", weight: 3, fillColor: YOU_COLOR, fillOpacity: 1 }}
           >
             <Tooltip direction="top" permanent={false} offset={[0, -14]}>
               <span style={{ fontFamily: "Nunito, sans-serif", fontSize: 12 }}>You are here</span>
@@ -141,6 +206,22 @@ export default function MapView({ crisis = [], shelters = [], hospitals = [], us
           </CircleMarker>
         )}
       </MapContainer>
+
+      {/* Find me — recenters the map on the user's location (bottom-left) */}
+      <button
+        onClick={findMe}
+        title="Center the map on my location"
+        style={{
+          position: "absolute", bottom: 28, left: 16, zIndex: 500,
+          display: "inline-flex", alignItems: "center", gap: 7,
+          background: "#fff", color: YOU_COLOR,
+          border: "none", borderRadius: 24, padding: "10px 16px",
+          fontFamily: "Nunito, sans-serif", fontSize: 13, fontWeight: 800,
+          cursor: "pointer", boxShadow: "0 2px 12px rgba(0,0,0,0.18)",
+        }}
+      >
+        <LocateFixed size={16} /> Find me
+      </button>
 
       {/* Map legend — overlaid in bottom-right corner of the map */}
       <div style={{
@@ -160,7 +241,7 @@ export default function MapView({ crisis = [], shelters = [], hospitals = [], us
         <LegendRow color="#EAB308" label="Low Severity" />
         <LegendRow color="#16A34A" label="Shelter" />
         <LegendRow color="#2563EB" label="Hospital" />
-        <LegendRow color="#3B82F6" label="Your location" />
+        <LegendRow color={YOU_COLOR} label="Your location" />
       </div>
     </div>
   );

@@ -642,6 +642,20 @@ func (c *Client) GetUserByID(id string) (*User, error) {
 	return &rows[0], nil
 }
 
+// UpdateUser patches the given columns on a user row (e.g. name, password_hash)
+// and returns the updated record. Backs the profile-edit endpoint.
+func (c *Client) UpdateUser(id string, updates map[string]interface{}) (*User, error) {
+	data, err := c.req("PATCH", "users?id=eq."+id, updates, nil)
+	if err != nil {
+		return nil, err
+	}
+	var rows []User
+	if err := json.Unmarshal(data, &rows); err != nil || len(rows) == 0 {
+		return nil, fmt.Errorf("user not found")
+	}
+	return &rows[0], nil
+}
+
 // Group chats are stored as chat_sessions rows whose title encodes the thread
 // key: "group:<crisisID>" for per-crisis threads, "taskgroup:<taskID>" for the
 // per-task threads introduced with task membership. The message array lives in

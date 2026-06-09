@@ -97,9 +97,14 @@ export default function Map() {
   // On mount: resolve location, load crises, fetch the shelter/hospital layers,
   // and read the current data-source mode so the toggle button shows the right state.
   useEffect(() => {
+    // Options matter: without a timeout the call can hang forever when a
+    // permission prompt is left pending, leaving userPos null so the "Your
+    // location" pin never renders. The error path falls back to SG centre so a
+    // pin always shows.
     navigator.geolocation.getCurrentPosition(
       (pos) => setUserPos([pos.coords.latitude, pos.coords.longitude]),
       ()    => setUserPos([1.3521, 103.8198]), // fall back to Singapore centre
+      { enableHighAccuracy: true, timeout: 8000, maximumAge: 60000 },
     );
     // Deferred so the state updates land in an async callback, not synchronously
     // in the effect body (react-hooks/set-state-in-effect).

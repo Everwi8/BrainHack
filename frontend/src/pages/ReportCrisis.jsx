@@ -3,7 +3,7 @@
 // collects a caption / tags / location before posting.
 import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { Zap } from "lucide-react";
+import { Zap, Check } from "lucide-react";
 import Navbar from "../components/layout/NavBar";
 import BrainyMascot from "../components/BrainyMascot";
 import { api } from "../lib/api";
@@ -94,6 +94,7 @@ export default function ReportCrisis() {
   const [coords, setCoords] = useState(null);           // { lat, lng } from geolocation
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState("");
+  const [done, setDone] = useState(null);   // { approved } once the report posts
 
   const videoRef = useRef(null);
   const streamRef = useRef(null);
@@ -250,18 +251,28 @@ export default function ReportCrisis() {
         lng,
         location_name: location.trim() || "Location not specified",
       });
+      // Show an explicit on-page confirmation rather than silently bouncing to
+      // the feed — the reporter gets clear feedback that the report went through,
+      // and (for residents/volunteers) that it's awaiting coordinator approval.
       const approved = created?.approval_status === "approved";
-      navigate("/timeline", {
-        state: {
-          flash: approved
-            ? "Report published — it's now in the feed and on the map."
-            : "Report submitted. A coordinator will review it before it appears in the feed and on the map.",
-        },
-      });
+      setDone({ approved });
+      setSubmitting(false);
     } catch (err) {
       setError(err.message || "Could not submit report. Please try again.");
       setSubmitting(false);
     }
+  };
+
+  // Reset everything back to a fresh capture so the user can file another report.
+  const reportAnother = () => {
+    setDone(null);
+    setStep("capture");
+    setCaptured(null);
+    setCaption("");
+    setSelectedTags([]);
+    setTags(DEFAULT_TAGS);
+    setDetected(null);
+    setError("");
   };
 
   return (
@@ -278,7 +289,51 @@ export default function ReportCrisis() {
       />
 
       <div className="report-layout">
-        {step === "capture" ? (
+        {done ? (
+          /* ── Confirmation ── */
+          <div style={{
+            flex: 1, display: "flex", flexDirection: "column", alignItems: "center",
+            gap: 16, textAlign: "center", padding: "32px 16px", maxWidth: 520, margin: "0 auto",
+          }}>
+            <div style={{
+              width: 72, height: 72, borderRadius: "50%", background: "#DCFCE7",
+              display: "flex", alignItems: "center", justifyContent: "center",
+            }}>
+              <Check size={38} color="#16A34A" strokeWidth={3} />
+            </div>
+            <h2 style={{ margin: 0, fontSize: 22, fontWeight: 800, color: "#1a1a2e" }}>
+              Crisis reported!
+            </h2>
+            <SpeechBubble>
+              {done.approved
+                ? "Thanks! Your report is now live in the feed and on the map for everyone to see."
+                : "Thanks! Your report has been submitted and is pending approval from a coordinator. It'll appear in the feed and on the map once approved."}
+            </SpeechBubble>
+            <BrainyMascot mood="happy" width={180} />
+            <div style={{ display: "flex", gap: 12, flexWrap: "wrap", justifyContent: "center" }}>
+              <button
+                onClick={() => navigate("/timeline")}
+                style={{
+                  background: "#1a1a2e", color: "#fff", border: "none", borderRadius: 24,
+                  padding: "12px 28px", fontFamily: "'Nunito', sans-serif", fontWeight: 800,
+                  fontSize: 15, cursor: "pointer",
+                }}
+              >
+                View Feed
+              </button>
+              <button
+                onClick={reportAnother}
+                style={{
+                  background: "#fff", color: "#1a1a2e", border: "1.5px solid #ddd", borderRadius: 24,
+                  padding: "12px 28px", fontFamily: "'Nunito', sans-serif", fontWeight: 800,
+                  fontSize: 15, cursor: "pointer",
+                }}
+              >
+                Report another
+              </button>
+            </div>
+          </div>
+        ) : step === "capture" ? (
           <>
             {/* ── Live camera panel ── */}
             <div className="report-main">

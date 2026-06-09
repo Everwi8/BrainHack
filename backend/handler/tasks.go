@@ -147,9 +147,9 @@ func MatchTasks(c *gin.Context) {
 }
 
 // JoinTask records the caller as a member of a task, which gates access to that
-// task's group chat. Residents/volunteers may hold at most ONE task per crisis
-// (the cap that makes the demo legible); coordinators are unlimited. Idempotent:
-// re-joining a task you're already on succeeds.
+// task's group chat. Residents/volunteers may hold at most ONE task at a time
+// across all crises (the cap that keeps a volunteer focused); coordinators are
+// unlimited. Idempotent: re-joining a task you're already on succeeds.
 func JoinTask(c *gin.Context) {
 	taskID := c.Param("id")
 
@@ -182,18 +182,22 @@ func JoinTask(c *gin.Context) {
 		return
 	}
 
-	// Non-coordinators: enforce one task per crisis, and that the task still has
-	// an open volunteer slot.
+	// Non-coordinators may hold at most ONE task at a time across ALL crises, and
+	// the task must still have an open volunteer slot. If they're already on any
+	// other task, block with a clear message and surface the current task id so
+	// the UI can offer leave-and-switch.
 	if user.Role != "coordinator" {
-		current, err := lib.DB.MemberTaskInCrisis(userID, task.CrisisID)
+		existing, err := lib.DB.ListMemberTasks(userID)
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "could not check membership"})
 			return
 		}
-		if current != "" {
+		// The idempotent already-member case is handled above, so any task here is
+		// a different one the volunteer would have to leave first.
+		if len(existing) > 0 {
 			c.JSON(http.StatusConflict, gin.H{
-				"error":           "You can only join one task per crisis. Leave your current task to switch.",
-				"current_task_id": current,
+				"error":           "You can only join one task at a time. Leave your current task to switch.",
+				"current_task_id": existing[0].ID,
 			})
 			return
 		}

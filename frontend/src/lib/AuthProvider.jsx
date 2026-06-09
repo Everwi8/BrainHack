@@ -51,8 +51,18 @@ export function AuthProvider({ children }) {
 
   const logout = useCallback(() => persist(null, null), [persist]);
 
+  // updateUser merges partial fields (e.g. an edited name) into the cached user
+  // and re-persists, so the navbar and greetings reflect profile edits at once.
+  const updateUser = useCallback((partial) => {
+    setUser((prev) => {
+      const next = { ...(prev || {}), ...partial };
+      localStorage.setItem(USER_KEY, JSON.stringify(next));
+      return next;
+    });
+  }, []);
+
   return (
-    <AuthContext.Provider value={{ token, user, isAuthenticated: !!token, login, logout }}>
+    <AuthContext.Provider value={{ token, user, isAuthenticated: !!token, login, logout, updateUser }}>
       {children}
     </AuthContext.Provider>
   );

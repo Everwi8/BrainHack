@@ -61,6 +61,9 @@ func main() {
 		// Auth (public)
 		api.POST("/auth/register", handler.Register)
 		api.POST("/auth/login", handler.Login)
+		// Profile (self): read + edit own name/password
+		api.GET("/auth/me", middleware.RequireAuth(), handler.GetMe)
+		api.PATCH("/auth/me", middleware.RequireAuth(), handler.UpdateMe)
 
 		// Crises (public read; only approved crises surface here)
 		api.GET("/crises", handler.ListCrises)
