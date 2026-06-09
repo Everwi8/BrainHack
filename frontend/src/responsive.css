@@ -222,6 +222,7 @@
 .chat-layout {
   flex: 1;
   overflow: hidden;
+  min-height: 0; /* allow flex shrink — without this the layout overflows 100vh and the page scrolls */
   display: flex;
   gap: 24px;
   padding: 0 40px;
@@ -234,11 +235,21 @@
 .chat-left-panel {
   width: 264px;
   flex-shrink: 0;
+  min-height: 0; /* allow inner flex: 1 children (sessions card) to size correctly */
   display: flex;
   flex-direction: column;
   align-items: center;
   padding: 24px 0 20px;
   gap: 16px;
+}
+
+/* On short laptop screens the mascot eats most of the left panel height,
+   leaving almost no room for the sessions list. Hide it so the sessions
+   card can grow to fill the space instead. */
+@media (max-height: 750px) {
+  .chat-left-mascot {
+    display: none;
+  }
 }
 
 @media (max-width: 900px) {
@@ -268,6 +279,22 @@
   align-items: flex-start;
 }
 
+/* Desktop: flex:1 was previously inline on .map-area; moved here so the
+   mobile override (flex:none) can win without needing !important. */
+.map-area {
+  flex: 1;
+}
+
+/* All three levels need min-height so the height:100% chain produces a
+   visible map. height:100% resolves to auto when the parent only has
+   min-height (not explicit height), so each level independently enforces
+   its own minimum. */
+.map-area,
+.map-area > div,
+.map-area .leaflet-container {
+  min-height: 580px;
+}
+
 .map-sidebar {
   width: 210px;
   flex-shrink: 0;
@@ -287,6 +314,20 @@
   .map-body {
     flex-direction: column;
     padding: 0 12px 20px;
+  }
+  /* On mobile the flex container switches to column, which makes flex-basis
+     the height axis. The inline flex:1 on .map-area sets flex-basis:0 and
+     overrides height:480px. flex:none switches to flex-basis:auto so CSS
+     height takes effect; align-self:stretch fills the cross-axis width. */
+  .map-area {
+    flex: none;
+    align-self: stretch;
+  }
+  .map-area,
+  .map-area > div,
+  .map-area .leaflet-container {
+    height: 480px;
+    min-height: 0;
   }
   .map-sidebar {
     width: 100%;

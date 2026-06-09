@@ -197,8 +197,10 @@ export default function Map() {
       <div className="map-body">
 
         {/* Map area — flex:1 makes it take all remaining horizontal space.
-            Clicking a crisis marker navigates to its detail page. */}
-        <div style={{ position: "relative", flex: 1, borderRadius: 16, overflow: "hidden", minHeight: 580 }}>
+            Clicking a crisis marker navigates to its detail page.
+            map-area class adds an explicit height on mobile so Leaflet
+            initialises with a real container size instead of 0. */}
+        <div className="map-area" style={{ position: "relative", borderRadius: 16, overflow: "hidden" }}>
           {/*
             We pass pre-filtered arrays into MapView.
             When filters.crises is false we pass [] (empty array), so MapView

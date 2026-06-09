@@ -29,13 +29,17 @@ function MapResizer() {
   const map = useMap();
   useEffect(() => {
     const invalidate = () => map.invalidateSize();
-    // One deferred call catches the initial layout settle on mount.
-    const t = setTimeout(invalidate, 200);
+    // Two deferred calls: 400ms catches the initial layout settle on mobile
+    // (fonts + stats bar paint after mount); 1200ms is a belt-and-suspenders
+    // pass for slow devices where CSS layout may still be in progress.
+    const t1 = setTimeout(invalidate, 400);
+    const t2 = setTimeout(invalidate, 1200);
     const ro = new ResizeObserver(invalidate);
     ro.observe(map.getContainer());
     window.addEventListener("orientationchange", invalidate);
     return () => {
-      clearTimeout(t);
+      clearTimeout(t1);
+      clearTimeout(t2);
       ro.disconnect();
       window.removeEventListener("orientationchange", invalidate);
     };
@@ -46,13 +50,22 @@ function MapResizer() {
 // RecenterOnUser pans/zooms to the user's resolved position the first time it
 // arrives, so the "Your location" pin is guaranteed to be in view (otherwise it
 // can sit off-screen and look like no pin appeared at all). Fires once.
+// The flyTo is delayed past MapResizer's invalidateSize (400ms) so Leaflet has
+// a valid container size before the animation math runs — calling flyTo on a
+// zero-size container produces NaN coordinates and crashes the render tree.
 function RecenterOnUser({ pos }) {
   const map = useMap();
   const done = useRef(false);
   useEffect(() => {
     if (pos && !done.current) {
       done.current = true;
-      map.flyTo(pos, 14, { duration: 1 });
+      const t = setTimeout(() => {
+        try {
+          const { x, y } = map.getSize();
+          if (x > 0 && y > 0) map.flyTo(pos, 14, { duration: 1 });
+        } catch (_) {}
+      }, 500);
+      return () => clearTimeout(t);
     }
   }, [pos, map]);
   return null;
@@ -94,7 +107,7 @@ export default function MapView({ crisis = [], shelters = [], hospitals = [], us
   return (
     // Outer wrapper is position:relative so the legend overlay and
     // loading spinner can sit on top of the map using position:absolute.
-    <div style={{ position: "relative", height: "100%", minHeight: 580 }}>
+    <div style={{ position: "relative", height: "100%" }}>
 
       {/* Loading overlay — visible while mock data is being "fetched" */}
       {loading && (
@@ -120,7 +133,7 @@ export default function MapView({ crisis = [], shelters = [], hospitals = [], us
         ref={mapRef}
         center={[1.3521, 103.8198]}
         zoom={12}
-        style={{ height: "100%", minHeight: 580, width: "100%", borderRadius: 16 }}
+        style={{ height: "100%", width: "100%", borderRadius: 16 }}
         zoomControl
       >
         {/* Keeps Leaflet's cached size in sync with the real container size —

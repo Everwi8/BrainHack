@@ -369,7 +369,7 @@ export default function Chat() {
 
   return (
     <div style={{
-      height: "100vh", display: "flex", flexDirection: "column",
+      height: "100vh", overflow: "hidden", display: "flex", flexDirection: "column",
       background: "#F5F0E8", fontFamily: "'Nunito', sans-serif", boxSizing: "border-box",
     }}>
       <Navbar />
@@ -377,7 +377,9 @@ export default function Chat() {
       <div className="chat-layout">
         {/* ── Left panel ── */}
         <div className="chat-left-panel">
-          <BrainyMascot mood={isTyping ? "normal" : "happy"} width={240} />
+          <div className="chat-left-mascot">
+            <BrainyMascot mood={isTyping ? "normal" : "happy"} width={240} />
+          </div>
           <div style={{
             background: "#fff", borderRadius: 20, padding: "18px 20px",
             boxShadow: "0 2px 12px rgba(0,0,0,0.08)", width: "100%",
@@ -474,7 +476,7 @@ export default function Chat() {
           padding: "0 0 20px", overflow: "hidden",
         }}>
           {/* Messages scroll area */}
-          <div style={{ flex: 1, overflowY: "auto", padding: "8px 0 4px" }}>
+          <div style={{ flex: 1, minHeight: 0, overflowY: "auto", padding: "8px 0 4px" }}>
             {messages.map(msg => (
               <MessageBubble
                 key={msg.id}
