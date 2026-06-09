@@ -179,6 +179,20 @@ func (c *Client) GetCrisesPaged(limit, offset int) ([]Crisis, error) {
 	return out, json.Unmarshal(data, &out)
 }
 
+// GetActiveCrisesByPrefix returns active crises whose external_id starts with
+// the given prefix (e.g. "nea:weather:"). Ingestion uses it to find rows that
+// should be resolved once their underlying signal clears, since upsert alone
+// never flips a stale row back to resolved.
+func (c *Client) GetActiveCrisesByPrefix(prefix string) ([]Crisis, error) {
+	path := "crises?status=eq.active&external_id=like." + url.QueryEscape(prefix+"*") + "&select=id,external_id"
+	data, err := c.req("GET", path, nil, nil)
+	if err != nil {
+		return nil, err
+	}
+	out := []Crisis{}
+	return out, json.Unmarshal(data, &out)
+}
+
 // GetPendingCrises returns citizen reports awaiting coordinator review.
 func (c *Client) GetPendingCrises() ([]Crisis, error) {
 	data, err := c.req("GET", "crises?approval_status=eq.pending&select=*&order=created_at.desc", nil, nil)

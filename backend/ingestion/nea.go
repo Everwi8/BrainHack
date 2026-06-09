@@ -198,6 +198,7 @@ func fetchWeather() error {
 		coords[m.Name] = [2]float64{m.LabelLocation.Lat, m.LabelLocation.Lng}
 	}
 
+	severe := make(map[string]bool)
 	for _, f := range resp.Data.Items[0].Forecasts {
 		if !isSevereWeather(f.Forecast) {
 			continue
@@ -206,8 +207,10 @@ func fetchWeather() error {
 		if !ok {
 			continue
 		}
+		externalID := "nea:weather:" + f.Area
+		severe[externalID] = true
 		crisis := lib.Crisis{
-			ExternalID:   "nea:weather:" + f.Area,
+			ExternalID:   externalID,
 			Title:        fmt.Sprintf("Severe Weather — %s (%s)", f.Area, f.Forecast),
 			Description:  fmt.Sprintf("2-hour forecast for %s: %s.", f.Area, f.Forecast),
 			Type:         "flood",
@@ -222,7 +225,29 @@ func fetchWeather() error {
 			log.Printf("[nea] upsert weather crisis for %s: %v", f.Area, err)
 		}
 	}
+
+	resolveClearedWeather(severe)
 	return nil
+}
+
+// resolveClearedWeather marks any active weather crisis whose area is no longer
+// in the severe set as resolved. Upsert only creates/refreshes severe rows, so
+// without this a "Severe Weather — … (Heavy Showers)" circle would linger on the
+// map indefinitely after the forecast eased back to plain showers.
+func resolveClearedWeather(severe map[string]bool) {
+	active, err := lib.DB.GetActiveCrisesByPrefix("nea:weather:")
+	if err != nil {
+		log.Printf("[nea] list active weather crises: %v", err)
+		return
+	}
+	for _, cr := range active {
+		if severe[cr.ExternalID] {
+			continue
+		}
+		if _, err := lib.DB.UpdateCrisis(cr.ID, map[string]interface{}{"status": "resolved"}); err != nil {
+			log.Printf("[nea] resolve cleared weather crisis %s: %v", cr.ExternalID, err)
+		}
+	}
 }
 
 func isSevereWeather(forecast string) bool {

@@ -19,8 +19,11 @@
 -- Idempotent: safe to re-run. Run AFTER schema.sql. Pairs with seed_users.sql
 -- (users) — this file seeds crises only.
 
--- Optional clean slate for crises (removes live-ingestion rows too):
--- DELETE FROM crises WHERE external_id LIKE 'nea:%' OR external_id LIKE 'lta:%' OR external_id LIKE 'pub:%';
+-- Clean slate: drop any live-ingestion rows (nea/lta/pub) left over from a
+-- previous DATA_SOURCE=live run. In demo mode the map should show ONLY the four
+-- curated rows below — without this, stale rows like "Severe Weather — … (Thundery
+-- Showers)" linger because live ingestion is paused and never resolves them.
+DELETE FROM crises WHERE external_id LIKE 'nea:%' OR external_id LIKE 'lta:%' OR external_id LIKE 'pub:%';
 
 -- The `sensors` jsonb (migration 004 / schema.sql) feeds the CrisisDetail
 -- "Live data sources" cards. Keys present render a value + status; omitted keys
