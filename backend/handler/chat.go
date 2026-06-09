@@ -131,6 +131,15 @@ func ChatStream(c *gin.Context) {
 		return
 	}
 
+	// Validate before opening the SSE stream so injection/length errors come
+	// back as plain JSON (not mid-stream SSE events).
+	clean, err := lib.ValidateUserInput(req.Message)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	req.Message = clean
+
 	userID := c.GetString("userID")
 	session, err := resolveSession(userID, req.SessionID, deriveTitle(req.Message))
 	if err != nil {
