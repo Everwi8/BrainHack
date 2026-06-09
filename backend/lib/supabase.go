@@ -2,12 +2,14 @@ package lib
 
 import (
 	"bytes"
+	"crypto/sha1"
 	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
 	"net/url"
 	"os"
+	"strings"
 	"time"
 )
 
@@ -337,6 +339,55 @@ func (c *Client) CreateTask(task Task) (*Task, error) {
 		return nil, fmt.Errorf("create task failed")
 	}
 	return &rows[0], nil
+}
+
+// taskIDNamespace is the RFC 4122 URL namespace; combined with a crisis id +
+// task title it yields a stable UUIDv5 for generated tasks.
+var taskIDNamespace = [16]byte{
+	0x6b, 0xa7, 0xb8, 0x11, 0x9d, 0xad, 0x11, 0xd1,
+	0x80, 0xb4, 0x00, 0xc0, 0x4f, 0xd4, 0x30, 0xc8,
+}
+
+// DeterministicTaskID derives a stable id from a crisis id + task title so that
+// regenerating the same AI task card (after a first-view race, or a demo/data
+// reset that dropped the rows) maps back to the SAME task — and therefore the
+// SAME per-task group chat (taskgroup:<id>) — instead of spawning a duplicate
+// thread alongside the old one.
+func DeterministicTaskID(crisisID, title string) string {
+	h := sha1.New()
+	h.Write(taskIDNamespace[:])
+	h.Write([]byte(crisisID + ":" + strings.ToLower(strings.TrimSpace(title))))
+	sum := h.Sum(nil)
+	var u [16]byte
+	copy(u[:], sum[:16])
+	u[6] = (u[6] & 0x0f) | 0x50 // version 5
+	u[8] = (u[8] & 0x3f) | 0x80 // RFC 4122 variant
+	return fmt.Sprintf("%x-%x-%x-%x-%x", u[0:4], u[4:6], u[6:8], u[8:10], u[10:16])
+}
+
+// UpsertAITask inserts a generated task under a deterministic id, but leaves any
+// existing row untouched (ON CONFLICT DO NOTHING). That keeps a duplicate run
+// from clobbering live state — joined volunteers, decremented volunteers_needed,
+// status — while still guaranteeing the same logical task keeps one stable id
+// and one group chat. The persisted row (new or pre-existing) is returned.
+func (c *Client) UpsertAITask(task Task) (*Task, error) {
+	if task.ID == "" {
+		task.ID = DeterministicTaskID(task.CrisisID, task.Title)
+	}
+	data, err := c.req("POST", "tasks?on_conflict=id", task, map[string]string{
+		"Prefer": "resolution=ignore-duplicates,return=representation",
+	})
+	if err != nil {
+		return nil, err
+	}
+	var rows []Task
+	if err := json.Unmarshal(data, &rows); err != nil {
+		return nil, err
+	}
+	if len(rows) > 0 {
+		return &rows[0], nil // freshly inserted
+	}
+	return c.GetTaskByID(task.ID) // row already existed — return it as-is
 }
 
 func (c *Client) UpdateTask(id string, updates map[string]interface{}) (*Task, error) {
@@ -699,8 +750,10 @@ func (c *Client) CreateChatSession(userID, title string) (*ChatSession, error) {
 	return &rows[0], nil
 }
 
-// ListChatSessions returns the user's conversations newest-first, without the
-// (potentially large) message transcripts — just enough for a sidebar.
+// ListChatSessions returns the user's personal conversations newest-first,
+// without the (potentially large) message transcripts — just enough for a
+// sidebar. Group and per-task threads share this table (keyed by a "group:" /
+// "taskgroup:" title) but are NOT personal Brainy chats, so they're excluded.
 func (c *Client) ListChatSessions(userID string) ([]ChatSession, error) {
 	path := "chat_sessions?user_id=eq." + userID +
 		"&select=id,title,created_at,updated_at&order=updated_at.desc"
@@ -708,8 +761,18 @@ func (c *Client) ListChatSessions(userID string) ([]ChatSession, error) {
 	if err != nil {
 		return nil, err
 	}
+	var rows []ChatSession
+	if err := json.Unmarshal(data, &rows); err != nil {
+		return nil, err
+	}
 	out := []ChatSession{}
-	return out, json.Unmarshal(data, &out)
+	for _, s := range rows {
+		if strings.HasPrefix(s.Title, groupChatTitlePrefix) || strings.HasPrefix(s.Title, taskChatTitlePrefix) {
+			continue // group/task thread — not a personal chat
+		}
+		out = append(out, s)
+	}
+	return out, nil
 }
 
 // GetChatSession loads one conversation, scoped to its owner. Filtering on

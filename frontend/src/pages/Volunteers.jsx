@@ -40,6 +40,37 @@ function senderBadge(role) {
   return "#9EC4DA";
 }
 
+// Render a chat message: turn **bold** into <strong> and break each sentence
+// onto its own line so dense guidance (e.g. Brainy's welcome) is easy to scan.
+// Author line breaks are preserved; decimals like "3.5" aren't treated as
+// sentence ends since the split requires whitespace after the punctuation.
+function renderBold(text, keyPrefix) {
+  return text.split(/\*\*(.*?)\*\*/g).map((part, i) =>
+    i % 2 === 1 ? <strong key={`${keyPrefix}-${i}`}>{part}</strong> : part
+  );
+}
+
+function formatMessageText(text) {
+  if (!text) return null;
+  const lines = [];
+  String(text).split(/\n+/).forEach((para) => {
+    const trimmed = para.trim();
+    if (!trimmed) return;
+    trimmed.split(/(?<=[.!?])\s+/).forEach((sentence) => {
+      const s = sentence.trim();
+      if (s) lines.push(s);
+    });
+  });
+  return lines.map((line, i) => (
+    <span
+      key={i}
+      style={{ display: "block", marginBottom: i === lines.length - 1 ? 0 : 6 }}
+    >
+      {renderBold(line, i)}
+    </span>
+  ));
+}
+
 function formatDuration(seconds) {
   const mins = Math.floor(seconds / 60);
   const secs = seconds % 60;
@@ -117,6 +148,8 @@ export default function Volunteers() {
   const [messagesError, setMessagesError] = useState("");
   const [cameraMenuOpen, setCameraMenuOpen] = useState(false);
   const [cameraOpen, setCameraOpen] = useState(false);
+  const [confirmingLeave, setConfirmingLeave] = useState(false); // header leave-task gate
+  const [leaving, setLeaving] = useState(false);                 // in-flight leave
 
   const { isRecording, recordingSeconds, start: startRecorder, stop: stopRecorder } = useVoiceRecorder();
 
@@ -215,18 +248,27 @@ export default function Volunteers() {
   }, []);
 
   // Leave the active task → frees the per-crisis slot and drops its chat tab.
+  // Gated behind a confirmation (the header button reveals Cancel / Confirm)
+  // so a stray click can't drop someone out of their task group.
   const leaveActiveTask = async () => {
     if (!activeGroup) return;
+    setLeaving(true);
+    const leftId = activeGroup;
     const token = getAuthToken();
     try {
-      await fetch(`${API_BASE_URL}/api/tasks/${activeGroup}/join`, {
+      await fetch(`${API_BASE_URL}/api/tasks/${leftId}/join`, {
         method: "DELETE",
         headers: token ? { Authorization: `Bearer ${token}` } : {},
       });
     } catch { /* ignore — refresh will reconcile */ }
-    setTaskTabs((prev) => prev.filter((t) => t.id !== activeGroup));
+    setTaskTabs((prev) => prev.filter((t) => t.id !== leftId));
     setActiveGroup("");
+    setConfirmingLeave(false);
+    setLeaving(false);
   };
+
+  // Reset the leave confirmation whenever the selected task changes.
+  useEffect(() => { setConfirmingLeave(false); }, [activeGroup]);
 
   const mapServerMessageToUI = (msg) => {
     const senderID = msg?.sender_user_id || "";
@@ -599,19 +641,49 @@ export default function Volunteers() {
               </div>
             </div>
             {group && (
-              <button
-                onClick={leaveActiveTask}
-                title="Leave this task"
-                style={{
-                  flexShrink: 0,
-                  display: "inline-flex", alignItems: "center", gap: 6,
-                  border: "1.5px solid #B42318", background: "#fff", color: "#B42318",
-                  borderRadius: 999, padding: "8px 16px",
-                  fontFamily: "'Nunito', sans-serif", fontWeight: 800, fontSize: 13, cursor: "pointer",
-                }}
-              >
-                <X size={14} /> Leave task
-              </button>
+              confirmingLeave ? (
+                <div style={{ flexShrink: 0, display: "inline-flex", alignItems: "center", gap: 8 }}>
+                  <span style={{ color: "#6F6E78", fontSize: 13, fontWeight: 800 }}>Leave this task?</span>
+                  <button
+                    onClick={() => setConfirmingLeave(false)}
+                    disabled={leaving}
+                    style={{
+                      display: "inline-flex", alignItems: "center",
+                      border: "1.5px solid #D5D2C9", background: "#fff", color: "#6F6E78",
+                      borderRadius: 999, padding: "8px 16px",
+                      fontFamily: "'Nunito', sans-serif", fontWeight: 800, fontSize: 13, cursor: "pointer",
+                    }}
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    onClick={leaveActiveTask}
+                    disabled={leaving}
+                    style={{
+                      display: "inline-flex", alignItems: "center", gap: 6,
+                      border: "1.5px solid #B42318", background: "#B42318", color: "#fff",
+                      borderRadius: 999, padding: "8px 16px",
+                      fontFamily: "'Nunito', sans-serif", fontWeight: 800, fontSize: 13, cursor: "pointer",
+                    }}
+                  >
+                    <X size={14} /> {leaving ? "Leaving…" : "Confirm leave"}
+                  </button>
+                </div>
+              ) : (
+                <button
+                  onClick={() => setConfirmingLeave(true)}
+                  title="Leave this task"
+                  style={{
+                    flexShrink: 0,
+                    display: "inline-flex", alignItems: "center", gap: 6,
+                    border: "1.5px solid #B42318", background: "#fff", color: "#B42318",
+                    borderRadius: 999, padding: "8px 16px",
+                    fontFamily: "'Nunito', sans-serif", fontWeight: 800, fontSize: 13, cursor: "pointer",
+                  }}
+                >
+                  <X size={14} /> Leave task
+                </button>
+              )
             )}
           </header>
 
@@ -739,6 +811,9 @@ export default function Volunteers() {
                 );
               }
 
+              // Multi-sentence/multi-line text reads better in a rounded card
+              // than a fully-rounded pill (which over-curves tall bubbles).
+              const isMultiLine = /\n|[.!?]\s+\S/.test((message.text || "").replace(/\*\*/g, ""));
               return (
                 <div key={message.id} style={{ display: "flex", alignItems: "flex-start", gap: 11, marginBottom: 16, maxWidth: "58%" }}>
                   <div
@@ -751,7 +826,7 @@ export default function Volunteers() {
                       marginTop: 35 / 2,
                     }}
                   />
-                  <div style={{ minWidth: 0 }}>
+                  <div style={{ minWidth: 0, textAlign: "left" }}>
                     <div
                       style={{
                         color: message.role === "brainy" ? "#D97706" : "#6F6D77",
@@ -765,7 +840,7 @@ export default function Volunteers() {
                     <div
                       style={{
                         border: "2px solid #1E1E1E",
-                        borderRadius: message.imageUrl ? 18 : 999,
+                        borderRadius: message.imageUrl || isMultiLine ? 18 : 999,
                         background: "#ECE8DF",
                         padding: "13px 22px",
                         fontSize: 34 / 2,
@@ -791,7 +866,7 @@ export default function Volunteers() {
                           }}
                         />
                       )}
-                      {message.text}
+                      {formatMessageText(message.text)}
                       {message.audioUrl && (
                         <audio
                           controls

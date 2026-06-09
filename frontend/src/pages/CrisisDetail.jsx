@@ -157,8 +157,9 @@ function SensorCard({ icon, label, value, status, pct }) {
 // its group chat. A task already joined shows an "Open chat" affordance, and a
 // one-task-per-crisis conflict offers leave-and-switch.
 function AiTaskCard({
-  task, joined, confirming, joining, error, recommended,
+  task, joined, confirming, joining, leaving, error, recommended,
   onRequestConfirm, onCancel, onConfirm, onOpenChat, onLeaveAndJoin,
+  onRequestLeave, onCancelLeave, onConfirmLeave,
 }) {
   const p = PRIORITY[task.priority] ?? PRIORITY.medium;
   const accent = joined ? "#16A34A" : "#EF4444";
@@ -213,9 +214,21 @@ function AiTaskCard({
 
         {/* Right-side action — depends on state */}
         {joined ? (
-          <button onClick={onOpenChat} style={ctaBtn("#16A34A")}>
-            <Check size={13} /> Joined · Open chat
-          </button>
+          leaving ? (
+            <span style={{ display: "inline-flex", gap: 8 }}>
+              <button onClick={onCancelLeave} disabled={joining} style={ghostBtn()}>Cancel</button>
+              <button onClick={onConfirmLeave} disabled={joining} style={ctaBtn("#EF4444")}>
+                {joining ? "Leaving…" : "Confirm leave"}
+              </button>
+            </span>
+          ) : (
+            <span style={{ display: "inline-flex", gap: 8 }}>
+              <button onClick={onRequestLeave} style={ghostBtn()}>Leave</button>
+              <button onClick={onOpenChat} style={ctaBtn("#16A34A")}>
+                <Check size={13} /> Joined · Open chat
+              </button>
+            </span>
+          )
         ) : error ? null : confirming ? (
           <span style={{ display: "inline-flex", gap: 8 }}>
             <button onClick={onCancel} disabled={joining} style={ghostBtn()}>Cancel</button>
@@ -371,7 +384,8 @@ export default function CrisisDetail() {
   // crisis) the user has already joined — non-coordinators may hold only one.
   const [myTaskId, setMyTaskId] = useState(null);
   const [confirmingId, setConfirmingId] = useState(null); // card showing Confirm
-  const [joiningId, setJoiningId] = useState(null);       // in-flight join
+  const [leavingId, setLeavingId] = useState(null);       // card showing Confirm leave
+  const [joiningId, setJoiningId] = useState(null);       // in-flight join/leave
   const [joinError, setJoinError] = useState(null);       // { taskId, message, currentTaskId }
 
   // "Find my match" flow: skill profile capture + Brainy's recommendation.
@@ -454,6 +468,17 @@ export default function CrisisDetail() {
     } else {
       setJoinError({ taskId, message: body.error || "Could not switch tasks." });
     }
+  };
+
+  // Leave a task the user has joined (after confirming on the card).
+  const leaveTask = async (taskId) => {
+    setJoiningId(taskId);
+    try {
+      await api.delete(`/api/tasks/${taskId}/join`);
+      setMyTaskId((cur) => (cur === taskId ? null : cur));
+    } catch { /* leave it joined on failure */ }
+    setJoiningId(null);
+    setLeavingId(null);
   };
 
   // ── "Find my match": ensure a skills profile, then rank this crisis's tasks ──
@@ -806,6 +831,7 @@ export default function CrisisDetail() {
                         recommended={!!taskId && recommendedTaskId === taskId}
                         joined={!!taskId && myTaskId === taskId}
                         confirming={confirmingId === taskId}
+                        leaving={leavingId === taskId}
                         joining={joiningId === taskId}
                         error={joinError?.taskId === taskId ? joinError : null}
                         onRequestConfirm={() => { setJoinError(null); setConfirmingId(taskId); }}
@@ -813,6 +839,9 @@ export default function CrisisDetail() {
                         onConfirm={() => confirmJoin(taskId)}
                         onOpenChat={() => openTaskChat(taskId)}
                         onLeaveAndJoin={() => leaveAndJoin(joinError.currentTaskId, taskId)}
+                        onRequestLeave={() => setLeavingId(taskId)}
+                        onCancelLeave={() => setLeavingId(null)}
+                        onConfirmLeave={() => leaveTask(taskId)}
                       />
                     );
                   })
