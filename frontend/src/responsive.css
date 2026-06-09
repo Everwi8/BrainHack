@@ -279,6 +279,11 @@
   align-items: flex-start;
 }
 
+/* Desktop: map area takes a fixed height so height:100% inside resolves correctly */
+.map-area {
+  min-height: 580px;
+}
+
 .map-sidebar {
   width: 210px;
   flex-shrink: 0;
@@ -299,15 +304,13 @@
     flex-direction: column;
     padding: 0 12px 20px;
   }
-  /* Force an explicit height on the entire Leaflet stack so tiles render.
-     height:100% requires an ancestor with a defined height (not min-height).
-     !important overrides the inline minHeight:580 on the wrapper and the
-     react-leaflet inline style on .leaflet-container. */
+  /* Give the entire Leaflet height chain a concrete pixel value on mobile.
+     inline minHeight has been removed from the JSX so CSS owns this cleanly. */
   .map-area,
   .map-area > div,
   .map-area .leaflet-container {
-    height: 480px !important;
-    min-height: unset !important;
+    height: 480px;
+    min-height: 0;
   }
   .map-sidebar {
     width: 100%;

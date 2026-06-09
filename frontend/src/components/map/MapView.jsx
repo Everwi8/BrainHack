@@ -98,7 +98,7 @@ export default function MapView({ crisis = [], shelters = [], hospitals = [], us
   return (
     // Outer wrapper is position:relative so the legend overlay and
     // loading spinner can sit on top of the map using position:absolute.
-    <div style={{ position: "relative", height: "100%", minHeight: 580 }}>
+    <div style={{ position: "relative", height: "100%" }}>
 
       {/* Loading overlay — visible while mock data is being "fetched" */}
       {loading && (
@@ -124,7 +124,7 @@ export default function MapView({ crisis = [], shelters = [], hospitals = [], us
         ref={mapRef}
         center={[1.3521, 103.8198]}
         zoom={12}
-        style={{ height: "100%", minHeight: 580, width: "100%", borderRadius: 16 }}
+        style={{ height: "100%", width: "100%", borderRadius: 16 }}
         zoomControl
       >
         {/* Keeps Leaflet's cached size in sync with the real container size —
