@@ -35,7 +35,9 @@ function buildIcon(severity) {
   });
 }
 
-export default function CrisisMarker({ crisis, onSelect }) {
+// `highlight` keeps the tooltip permanently open — used when the map was opened
+// via a "View Map" deep link so the target crisis is unmistakable.
+export default function CrisisMarker({ crisis, onSelect, highlight = false }) {
   // useNavigate is React Router's hook for programmatic navigation.
   // Calling navigate("/crises/crisis-1") is the same as the user clicking
   // <Link to="/crises/crisis-1">, but triggered from a Leaflet click event.
@@ -57,7 +59,7 @@ export default function CrisisMarker({ crisis, onSelect }) {
     >
       {/* Tooltip appears on hover — shows the crisis name, severity, and a
           call-to-action so the user knows clicking opens the detail page. */}
-      <Tooltip direction="top" offset={[0, -12]}>
+      <Tooltip direction="top" offset={[0, -12]} permanent={highlight}>
         <span style={{ fontFamily: "Nunito, sans-serif", fontSize: 13, fontWeight: 700, color: "#1a1a2e" }}>
           {crisis.title}
         </span>

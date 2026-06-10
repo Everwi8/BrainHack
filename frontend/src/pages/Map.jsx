@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import { BedDouble, House, TriangleAlert, FlaskConical, Radio } from "lucide-react";
 import Navbar from "../components/layout/NavBar";
 import MapView from "../components/map/MapView";
@@ -62,6 +62,10 @@ function FilterRow({ color, label, checked, onChange }) {
 // ─── Map page ─────────────────────────────────────────────────────────────────
 export default function Map() {
   const navigate = useNavigate();
+  // "View Map" links from crisis cards arrive as /map?crisis=<id> — once the
+  // crisis list loads, the map flies to that crisis and highlights its marker.
+  const [searchParams] = useSearchParams();
+  const focusCrisisId = searchParams.get("crisis");
   // Each of these useState calls creates a piece of React state.
   // React re-renders the component whenever you call the setter (e.g. setCrises).
   const [crisis,    setCrisis]    = useState([]);
@@ -144,6 +148,9 @@ export default function Map() {
   }, [mode, switching, loadCrises]);
 
   // Derived values computed from state — no extra useState needed.
+  const focusCrisis = focusCrisisId
+    ? crisis.find((c) => String(c.id) === focusCrisisId) ?? null
+    : null;
   const activeCrisis = crisis.filter(c => c.status === "active").length;
   const totalBeds    = hospitals.reduce((sum, h) => sum + h.beds_available, 0);
 
@@ -253,6 +260,7 @@ export default function Map() {
             userPos={userPos}
             loading={loading}
             onCrisisSelect={handleSelectCrisis}
+            focusCrisis={filters.crises ? focusCrisis : null}
           />
         </div>
 

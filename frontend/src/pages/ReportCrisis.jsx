@@ -67,6 +67,37 @@ function SpeechBubble({ children }) {
   );
 }
 
+// AnalyzingBanner is the status pill shown while the photo is at the vision
+// model — reassures the reporter that Brainy is working before the form fills.
+function AnalyzingBanner() {
+  return (
+    <div style={{
+      display: "flex", alignItems: "center", gap: 10, alignSelf: "stretch",
+      background: "#1a1a2e", borderRadius: 12, padding: "12px 16px",
+    }}>
+      <style>{`
+        @keyframes brainy-doc-bounce {
+          0%, 80%, 100% { transform: translateY(0); opacity: 0.4; }
+          40%            { transform: translateY(-4px); opacity: 1; }
+        }
+      `}</style>
+      {[0, 0.16, 0.32].map((delay, i) => (
+        <span
+          key={i}
+          style={{
+            width: 7, height: 7, borderRadius: "50%", background: "#FACC15", flexShrink: 0,
+            animation: `brainy-doc-bounce 1.1s ease-in-out ${delay}s infinite`,
+            marginRight: i === 2 ? 4 : -4,
+          }}
+        />
+      ))}
+      <span style={{ fontFamily: MONO, fontSize: 12.5, fontWeight: 700, color: "#fff", letterSpacing: 0.4 }}>
+        Brainy is understanding your crisis and documenting it…
+      </span>
+    </div>
+  );
+}
+
 function FieldLabel({ children }) {
   return (
     <div style={{
@@ -150,7 +181,9 @@ export default function ReportCrisis() {
         // a value the user has already typed — only replace the auto coords.
         try {
           const g = await api.get(`/api/geocode/reverse?lat=${lat}&lng=${lng}`);
-          if (g?.address) {
+          // The backend echoes "≈ lat, lng" when it couldn't resolve an address —
+          // keep our shorter local fallback rather than swapping in raw coords.
+          if (g?.address && !g.address.startsWith("≈")) {
             setLocation((prev) => (!prev || prev.startsWith("≈ ") ? g.address : prev));
           }
         } catch {
@@ -425,6 +458,8 @@ export default function ReportCrisis() {
 
             {/* ── Caption / tags / location / post ── */}
             <div className="report-side" style={{ alignItems: "stretch" }}>
+              {analyzing && <AnalyzingBanner />}
+
               <div>
                 <FieldLabel>CAPTION</FieldLabel>
                 <textarea
@@ -535,8 +570,17 @@ export default function ReportCrisis() {
               )}
 
               <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 8, marginTop: 8 }}>
-                <SpeechBubble>Image successfully captured! Add a description for this situation, so that other users can be aware.</SpeechBubble>
-                <BrainyMascot mood="happy" width={200} />
+                {analyzing ? (
+                  <>
+                    <SpeechBubble>Got your photo! I'm understanding your crisis and documenting it — give me a moment…</SpeechBubble>
+                    <BrainyMascot mood="surprised" width={200} />
+                  </>
+                ) : (
+                  <>
+                    <SpeechBubble>Image successfully captured! Add a description for this situation, so that other users can be aware.</SpeechBubble>
+                    <BrainyMascot mood="happy" width={200} />
+                  </>
+                )}
               </div>
             </div>
           </>

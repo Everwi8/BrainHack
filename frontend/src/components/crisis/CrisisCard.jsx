@@ -151,7 +151,7 @@ export default function CrisisCard({ crises = [], userPos = null, loading = fals
                     {pillFor(c, userPos)}
                   </span>
                   {!d.resolved && (
-                    <button onClick={(e) => { e.stopPropagation(); navigate("/map"); }} style={{
+                    <button onClick={(e) => { e.stopPropagation(); navigate(`/map?crisis=${c.id}`); }} style={{
                       background: "none", border: "none", cursor: "pointer",
                       color: "#3B82F6", fontWeight: 700, fontSize: 13,
                       fontFamily: "'Nunito', sans-serif", display: "flex", alignItems: "center", gap: 4,

@@ -53,10 +53,15 @@ function MapResizer() {
 // The flyTo is delayed past MapResizer's invalidateSize (400ms) so Leaflet has
 // a valid container size before the animation math runs — calling flyTo on a
 // zero-size container produces NaN coordinates and crashes the render tree.
-function RecenterOnUser({ pos }) {
+// `disabled` suppresses it when a deep-linked crisis is the flight target instead.
+function RecenterOnUser({ pos, disabled = false }) {
   const map = useMap();
   const done = useRef(false);
   useEffect(() => {
+    if (disabled) {
+      done.current = true; // a focused crisis owns the camera — never user-recenter
+      return;
+    }
     if (pos && !done.current) {
       done.current = true;
       const t = setTimeout(() => {
@@ -67,7 +72,27 @@ function RecenterOnUser({ pos }) {
       }, 500);
       return () => clearTimeout(t);
     }
-  }, [pos, map]);
+  }, [pos, map, disabled]);
+  return null;
+}
+
+// FocusCrisis flies to a deep-linked crisis (/map?crisis=<id>) once it appears
+// in the loaded list, zooming in far enough to break it out of any cluster.
+// Same 500ms delay rationale as RecenterOnUser.
+function FocusCrisis({ crisis }) {
+  const map = useMap();
+  const done = useRef(false);
+  useEffect(() => {
+    if (!crisis || done.current) return;
+    done.current = true;
+    const t = setTimeout(() => {
+      try {
+        const { x, y } = map.getSize();
+        if (x > 0 && y > 0) map.flyTo([crisis.lat, crisis.lng], 16, { duration: 1 });
+      } catch (_) {}
+    }, 500);
+    return () => clearTimeout(t);
+  }, [crisis, map]);
   return null;
 }
 
@@ -90,7 +115,7 @@ function LegendRow({ color, label }) {
 // MapView receives pre-filtered arrays from Map.jsx.
 // When the user unchecks "Shelters", Map.jsx passes an empty [] here,
 // so MapView doesn't need to know about filter state at all — clean separation.
-export default function MapView({ crisis = [], shelters = [], hospitals = [], userPos, loading, onCrisisSelect }) {
+export default function MapView({ crisis = [], shelters = [], hospitals = [], userPos, loading, onCrisisSelect, focusCrisis = null }) {
   // Ref to the Leaflet map instance so the "Find me" overlay button (which lives
   // outside the MapContainer's React tree) can pan the map.
   const mapRef = useRef(null);
@@ -139,7 +164,8 @@ export default function MapView({ crisis = [], shelters = [], hospitals = [], us
         {/* Keeps Leaflet's cached size in sync with the real container size —
             without this the map renders blank on mobile (see MapResizer above). */}
         <MapResizer />
-        <RecenterOnUser pos={userPos} />
+        <RecenterOnUser pos={userPos} disabled={!!focusCrisis} />
+        <FocusCrisis crisis={focusCrisis} />
 
         {/*
           TileLayer loads the map background images (tiles).
@@ -162,7 +188,12 @@ export default function MapView({ crisis = [], shelters = [], hospitals = [], us
         */}
         <MarkerClusterGroup>
           {crisis.map(crisis => (
-            <CrisisMarker key={crisis.id} crisis={crisis} onSelect={onCrisisSelect} />
+            <CrisisMarker
+              key={crisis.id}
+              crisis={crisis}
+              onSelect={onCrisisSelect}
+              highlight={crisis.id === focusCrisis?.id}
+            />
           ))}
         </MarkerClusterGroup>
 

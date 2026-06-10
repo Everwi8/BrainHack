@@ -1,6 +1,7 @@
 // Reverse geocoding: turn GPS lat/lng into a human-readable address for the
-// report form's Location field. Uses OpenStreetMap's Nominatim (keyless), proxied
-// through the backend so we can set a proper User-Agent and cache results.
+// report form's Location field. Tries OneMap first (authoritative Singapore
+// block/road data), then OpenStreetMap's Nominatim (keyless), proxied through
+// the backend so we can set a proper User-Agent and cache results.
 package handler
 
 import (
@@ -8,12 +9,14 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
 
 	"backend/cache"
+	"backend/lib"
 )
 
 var geoClient = &http.Client{Timeout: 6 * time.Second}
@@ -29,15 +32,29 @@ func ReverseGeocode(c *gin.Context) {
 		return
 	}
 
-	fallback := fmt.Sprintf("≈ %s, %s", lat, lng)
-	// Cache per-coordinate (also caches the fallback) to avoid hammering Nominatim.
-	raw, _ := cache.GlobalCache.GetOrFetch("revgeo:"+lat+","+lng, func() (interface{}, error) {
+	// Cache per-coordinate to avoid hammering the upstream geocoders. Failures
+	// return an error (not the fallback) so they aren't cached for the TTL.
+	raw, err := cache.GlobalCache.GetOrFetch("revgeo:"+lat+","+lng, func() (interface{}, error) {
+		// OneMap first: local SG data, e.g. "Block 402, Ang Mo Kio Avenue 10".
+		if latF, errLat := strconv.ParseFloat(lat, 64); errLat == nil {
+			if lngF, errLng := strconv.ParseFloat(lng, 64); errLng == nil {
+				if addr := lib.ReverseGeocode(latF, lngF); addr != "" {
+					// Drop the "near " prefix — it reads oddly in a Location field.
+					return strings.TrimPrefix(addr, "near "), nil
+				}
+			}
+		}
 		addr, err := nominatimReverse(lat, lng)
 		if err != nil || addr == "" {
-			return fallback, nil
+			return nil, fmt.Errorf("reverse geocode unavailable for %s,%s", lat, lng)
 		}
 		return addr, nil
 	})
+	if err != nil {
+		// Both geocoders failed — give the caller readable coordinates.
+		c.JSON(http.StatusOK, gin.H{"address": fmt.Sprintf("≈ %s, %s", lat, lng)})
+		return
+	}
 
 	c.JSON(http.StatusOK, gin.H{"address": raw})
 }
