@@ -198,6 +198,108 @@ func RetrieveTheme(queryName string, latMin, lngMin, latMax, lngMax float64) []T
 	return points
 }
 
+// ── Routing (travel-time ETAs) ────────────────────────────────────────────────
+//
+// OneMap's routing service gives point-to-point travel time. The Crisis Detail
+// page surfaces two modes so a resident can judge how to reach a situation:
+// driving (private vehicle) and public transport (bus + MRT). Both are
+// best-effort like the rest of this file — any failure returns ok=false and the
+// UI simply omits that ETA rather than erroring.
+
+const onemapRouteURL = "https://www.onemap.gov.sg/api/public/routingsvc/route"
+
+// onemapRouteGet performs an authenticated GET against the routing service and
+// decodes the JSON body into dst. Returns false on any error (unconfigured
+// token, network failure, non-2xx, malformed body) so callers degrade quietly.
+func onemapRouteGet(query string, dst interface{}) bool {
+	token := onemapToken()
+	if token == "" {
+		return false
+	}
+	req, _ := http.NewRequest("GET", onemapRouteURL+"?"+query, nil)
+	req.Header.Set("Authorization", token)
+	resp, err := onemapHTTP.Do(req)
+	if err != nil {
+		return false
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return false
+	}
+	raw, _ := io.ReadAll(resp.Body)
+	return json.Unmarshal(raw, dst) == nil
+}
+
+// secondsToMinutes rounds a positive second count up to whole minutes (so a
+// 90-second hop reads as "2 min", never "1 min" or "0 min"). Non-positive
+// inputs are treated as "no usable time".
+func secondsToMinutes(secs int) (int, bool) {
+	if secs <= 0 {
+		return 0, false
+	}
+	return (secs + 59) / 60, true
+}
+
+// DriveETAMinutes returns the private-vehicle travel time in whole minutes
+// between two coordinates, or ok=false when OneMap can't answer.
+func DriveETAMinutes(fromLat, fromLng, toLat, toLng float64) (int, bool) {
+	q := url.Values{}
+	q.Set("start", fmt.Sprintf("%f,%f", fromLat, fromLng))
+	q.Set("end", fmt.Sprintf("%f,%f", toLat, toLng))
+	q.Set("routeType", "drive")
+
+	var out struct {
+		RouteSummary struct {
+			TotalTime int `json:"total_time"` // seconds
+		} `json:"route_summary"`
+	}
+	if !onemapRouteGet(q.Encode(), &out) {
+		return 0, false
+	}
+	return secondsToMinutes(out.RouteSummary.TotalTime)
+}
+
+// TransitETAMinutes returns the public-transport (bus + MRT) travel time in
+// whole minutes between two coordinates, or ok=false when OneMap can't answer.
+//
+// OneMap's PT routing is time-of-day sensitive: it plans against the live
+// schedule for the date/time given, so overnight hours legitimately return "no
+// route" (no service) — which we surface as simply unavailable, not an error.
+// We query against the current Singapore time.
+func TransitETAMinutes(fromLat, fromLng, toLat, toLng float64) (int, bool) {
+	now := time.Now().In(singaporeLocation())
+	q := url.Values{}
+	q.Set("start", fmt.Sprintf("%f,%f", fromLat, fromLng))
+	q.Set("end", fmt.Sprintf("%f,%f", toLat, toLng))
+	q.Set("routeType", "pt")
+	q.Set("date", now.Format("01-02-2006")) // OneMap wants MM-DD-YYYY
+	q.Set("time", now.Format("15:04:05"))
+	q.Set("mode", "TRANSIT")         // bus + rail
+	q.Set("maxWalkDistance", "1500") // metres of walking OneMap may include
+	q.Set("numItineraries", "1")
+
+	var out struct {
+		Plan struct {
+			Itineraries []struct {
+				Duration int `json:"duration"` // seconds
+			} `json:"itineraries"`
+		} `json:"plan"`
+	}
+	if !onemapRouteGet(q.Encode(), &out) || len(out.Plan.Itineraries) == 0 {
+		return 0, false
+	}
+	return secondsToMinutes(out.Plan.Itineraries[0].Duration)
+}
+
+// singaporeLocation returns Asia/Singapore, falling back to a fixed UTC+8 zone
+// if the tzdata isn't available on the host — so PT queries always carry SGT.
+func singaporeLocation() *time.Location {
+	if loc, err := time.LoadLocation("Asia/Singapore"); err == nil {
+		return loc
+	}
+	return time.FixedZone("SGT", 8*60*60)
+}
+
 // omString coerces an interface{} from the decoded JSON map to a trimmed string.
 func omString(v interface{}) string {
 	s, _ := v.(string)

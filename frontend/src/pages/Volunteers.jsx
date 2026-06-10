@@ -157,6 +157,8 @@ export default function Volunteers() {
   const clipUrlsRef = useRef([]);
   const imageUrlsRef = useRef([]);
   const uploadInputRef = useRef(null);
+  // The scrollable message list, so we can keep it pinned to the newest message.
+  const messageListRef = useRef(null);
   const currentUserID = useMemo(() => getCurrentUserIDFromToken(), []);
   // Task to open on arrival, passed from the Crisis Detail join flow (?task_id=).
   const preselectTaskId = useMemo(
@@ -188,6 +190,17 @@ export default function Volunteers() {
       imageUrlsRef.current.forEach((url) => URL.revokeObjectURL(url));
     };
   }, []);
+
+  // Keep the chat pinned to the bottom whenever a new message appears — the
+  // user's own message, or Brainy's reply that arrives via the 2.5s poll. Keyed
+  // on message count (not the array) so it fires on a genuine new message and
+  // not on every no-op poll, and on activeGroup so switching tabs lands at the
+  // latest message too. Without this, Brainy's answer renders below the fold and
+  // the user has to scroll manually — easy to miss entirely.
+  useEffect(() => {
+    const el = messageListRef.current;
+    if (el) el.scrollTop = el.scrollHeight;
+  }, [messages.length, activeGroup]);
 
   useEffect(() => {
     let ignore = false;
@@ -717,6 +730,7 @@ export default function Volunteers() {
           </header>
 
           <div
+            ref={messageListRef}
             style={{
               background: "#f0e5e5",
               borderBottom: "2px solid #1E1E1E",
