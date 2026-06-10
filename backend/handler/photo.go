@@ -108,7 +108,7 @@ func ChatPhoto(c *gin.Context) {
 	lat, _ := strconv.ParseFloat(c.PostForm("lat"), 64)
 	lng, _ := strconv.ParseFloat(c.PostForm("lng"), 64)
 
-	reply, obs, updated, err := lib.VisionTurn(session.Messages, caption, dataURL, imageURL, userContext(userID, lat, lng))
+	reply, obs, updated, err := lib.VisionTurn(session.Messages, caption, dataURL, imageURL, userContext(userID, lat, lng, c.PostForm("lang")))
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return

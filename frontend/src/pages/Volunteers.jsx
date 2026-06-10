@@ -569,6 +569,7 @@ export default function Volunteers() {
       <Navbar />
 
       <main
+        className="taskchat-main"
         style={{
           width: "100%",
           maxWidth: 1660,
@@ -604,17 +605,23 @@ export default function Volunteers() {
         </div>
 
         <section
+          className="taskchat-section"
           style={{
             border: "2px solid #1E1E1E",
             borderRadius: 30,
             background: "#ECE8DF",
             overflow: "hidden",
-            height: 760,
+            // Fit within the viewport so the chat doesn't push the page into a
+            // scroll. Caps at 760px on tall screens; on shorter laptops it
+            // shrinks to leave room for the navbar (64), main padding (56) and
+            // the task-tab row (~50). The message list inside still scrolls.
+            height: "min(760px, calc(100vh - 170px))",
             display: "grid",
             gridTemplateRows: "auto 1fr auto",
           }}
         >
           <header
+            className="taskchat-header"
             style={{
               borderBottom: "2px solid #1E1E1E",
               padding: "20px 50px 18px",
@@ -626,10 +633,11 @@ export default function Volunteers() {
             }}
           >
             <div style={{ minWidth: 0 }}>
-              <div style={{ fontWeight: 800, fontSize: 38 / 2, color: "#131313", lineHeight: 1.2 }}>
+              <div className="taskchat-title" style={{ fontWeight: 800, fontSize: 38 / 2, color: "#131313", lineHeight: 1.2 }}>
                 {group?.title || "No task selected"}
               </div>
               <div
+                className="taskchat-meta"
                 style={{
                   marginTop: 4,
                   color: "#6F6E78",
@@ -716,7 +724,7 @@ export default function Volunteers() {
                 const hasImage = Boolean(message.imageUrl);
                 return (
                   <div key={message.id} style={{ width: "100%", display: "flex", justifyContent: "flex-end", marginBottom: 16 }}>
-                    <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", maxWidth: "42%", gap: 8 }}>
+                    <div className="taskchat-bubble-me" style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", maxWidth: "42%", gap: 8, textAlign: "left" }}>
                       <div style={{ color: "#6F6D77", fontWeight: 700, fontSize: 30 / 2, marginBottom: 5 }}>{message.sender}</div>
                       {hasImage ? (
                         <>
@@ -815,7 +823,7 @@ export default function Volunteers() {
               // than a fully-rounded pill (which over-curves tall bubbles).
               const isMultiLine = /\n|[.!?]\s+\S/.test((message.text || "").replace(/\*\*/g, ""));
               return (
-                <div key={message.id} style={{ display: "flex", alignItems: "flex-start", gap: 11, marginBottom: 16, maxWidth: "58%" }}>
+                <div key={message.id} className="taskchat-bubble-other" style={{ display: "flex", alignItems: "flex-start", gap: 11, marginBottom: 16, maxWidth: "58%" }}>
                   <div
                     style={{
                       width: 42,
@@ -882,6 +890,7 @@ export default function Volunteers() {
           </div>
 
           <footer
+            className="taskchat-footer"
             style={{
               padding: "14px 14px",
               background: "#ECE8DF",
@@ -947,6 +956,7 @@ export default function Volunteers() {
                   style={{ display: "none" }}
                 />
                 <button
+                  className="taskchat-iconbtn"
                   style={{
                     width: 62,
                     height: 62,
@@ -1037,6 +1047,7 @@ export default function Volunteers() {
                 )}
               </div>
               <button
+                className="taskchat-iconbtn"
                 style={{
                   width: 62,
                   height: 62,
@@ -1056,6 +1067,7 @@ export default function Volunteers() {
             </div>
 
             <input
+              className="taskchat-input"
               value={draft}
               onChange={(e) => setDraft(e.target.value)}
               placeholder="Message group… (type @Brainy to ask)"
@@ -1084,6 +1096,7 @@ export default function Volunteers() {
               title="Send Message"
               onClick={handleSendMessage}
               disabled={!canSend}
+              className="taskchat-iconbtn"
               style={{
                 width: 62,
                 height: 62,

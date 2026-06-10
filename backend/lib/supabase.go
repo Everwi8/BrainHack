@@ -68,6 +68,7 @@ type User struct {
 	PasswordHash string    `json:"password_hash,omitempty"`
 	Name         string    `json:"name"`
 	Role         string    `json:"role,omitempty"`
+	Language     string    `json:"language,omitempty"` // preferred Brainy reply language ("en","zh","ms","ta","en-SG")
 	CreatedAt    time.Time `json:"created_at,omitempty"`
 }
 

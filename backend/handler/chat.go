@@ -21,15 +21,22 @@ type chatReq struct {
 	SessionID string  `json:"session_id"`
 	Lat       float64 `json:"lat"` // optional: caller's geolocation, for personalisation
 	Lng       float64 `json:"lng"`
+	Lang      string  `json:"lang"` // optional: preferred reply language code (e.g. "zh")
 }
 
 // userContext builds the personalisation passed to Brainy: the caller's first
-// name (from the users table) and a rough area derived from optional lat/lng.
-// Any piece we can't resolve is simply left blank.
-func userContext(userID string, lat, lng float64) lib.UserContext {
-	uc := lib.UserContext{Area: lib.LocationLabel(lat, lng)}
+// name (from the users table), a rough area derived from optional lat/lng, and
+// the preferred reply language. Any piece we can't resolve is left blank.
+func userContext(userID string, lat, lng float64, lang string) lib.UserContext {
+	uc := lib.UserContext{Area: lib.LocationLabel(lat, lng), Lang: lang}
 	if u, err := lib.DB.GetUserByID(userID); err == nil && u != nil {
 		uc.Name = firstName(u.Name)
+		// Fall back to the saved account preference when the request omits one,
+		// so Brainy honours the stored language even on entrypoints that don't
+		// pass it explicitly.
+		if uc.Lang == "" {
+			uc.Lang = u.Language
+		}
 	}
 	return uc
 }
@@ -94,7 +101,7 @@ func Chat(c *gin.Context) {
 		return
 	}
 
-	reply, updated, err := lib.ChatTurn(session.Messages, req.Message, userContext(userID, req.Lat, req.Lng))
+	reply, updated, err := lib.ChatTurn(session.Messages, req.Message, userContext(userID, req.Lat, req.Lng, req.Lang))
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
@@ -157,7 +164,7 @@ func ChatStream(c *gin.Context) {
 		c.Writer.Flush()
 	}
 
-	reply, updated, err := lib.ChatTurnStream(session.Messages, req.Message, userContext(userID, req.Lat, req.Lng), onToken)
+	reply, updated, err := lib.ChatTurnStream(session.Messages, req.Message, userContext(userID, req.Lat, req.Lng, req.Lang), onToken)
 	if err != nil {
 		c.SSEvent("error", gin.H{"error": err.Error()})
 		c.Writer.Flush()

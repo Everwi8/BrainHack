@@ -11,6 +11,9 @@ CREATE TABLE IF NOT EXISTS users (
   role          TEXT        NOT NULL DEFAULT 'resident'
                   CONSTRAINT user_role_valid
                   CHECK (role IN ('resident','volunteer','coordinator')),
+  language      TEXT        NOT NULL DEFAULT 'en-SG'
+                  CONSTRAINT user_language_valid
+                  CHECK (language IN ('en-SG','zh','ms','ta')),
   created_at    TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 

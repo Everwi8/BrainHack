@@ -26,6 +26,12 @@ type loginRequest struct {
 	Password string `json:"password" binding:"required"`
 }
 
+// userJSON is the public shape of a user returned to the client — never the
+// password hash. Includes the saved Brainy reply-language preference.
+func userJSON(u *lib.User) gin.H {
+	return gin.H{"id": u.ID, "email": u.Email, "name": u.Name, "role": u.Role, "language": u.Language}
+}
+
 func Register(c *gin.Context) {
 	var req registerRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -63,7 +69,7 @@ func Register(c *gin.Context) {
 
 	c.JSON(http.StatusCreated, gin.H{
 		"token": token,
-		"user":  gin.H{"id": user.ID, "email": user.Email, "name": user.Name, "role": user.Role},
+		"user":  userJSON(user),
 	})
 }
 
@@ -93,7 +99,7 @@ func Login(c *gin.Context) {
 
 	c.JSON(http.StatusOK, gin.H{
 		"token": token,
-		"user":  gin.H{"id": user.ID, "email": user.Email, "name": user.Name, "role": user.Role},
+		"user":  userJSON(user),
 	})
 }
 
@@ -105,12 +111,13 @@ func GetMe(c *gin.Context) {
 		c.JSON(http.StatusNotFound, gin.H{"error": "user not found"})
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"id": user.ID, "email": user.Email, "name": user.Name, "role": user.Role})
+	c.JSON(http.StatusOK, userJSON(user))
 }
 
 type updateMeRequest struct {
 	Name     *string `json:"name"`
 	Password *string `json:"password"`
+	Language *string `json:"language"`
 }
 
 // UpdateMe lets the authenticated caller edit their own display name and/or
@@ -143,6 +150,14 @@ func UpdateMe(c *gin.Context) {
 		}
 		updates["password_hash"] = string(hash)
 	}
+	if req.Language != nil {
+		lang := strings.TrimSpace(*req.Language)
+		if !lib.IsSupportedLanguage(lang) {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "unsupported language"})
+			return
+		}
+		updates["language"] = lang
+	}
 	if len(updates) == 0 {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "nothing to update"})
 		return
@@ -153,7 +168,7 @@ func UpdateMe(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "could not update profile"})
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{"id": user.ID, "email": user.Email, "name": user.Name, "role": user.Role})
+	c.JSON(http.StatusOK, userJSON(user))
 }
 
 func issueToken(userID, email, role string) (string, error) {

@@ -74,15 +74,15 @@ function RecenterOnUser({ pos }) {
 // A small helper that renders one row of the map legend
 function LegendRow({ color, label }) {
   return (
-    <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 5 }}>
+    <div style={{ display: "flex", alignItems: "center", gap: 7, marginBottom: 4 }}>
       <div style={{
-        width: 12, height: 12, borderRadius: "50%",
+        width: 10, height: 10, borderRadius: "50%",
         background: color,
         border: "2px solid #fff",
         boxShadow: "0 0 4px rgba(0,0,0,0.2)",
         flexShrink: 0,
       }} />
-      <span style={{ fontSize: 12, color: "#444", fontFamily: "Nunito, sans-serif" }}>{label}</span>
+      <span style={{ fontSize: 11, color: "#444", fontFamily: "Nunito, sans-serif" }}>{label}</span>
     </div>
   );
 }
@@ -240,13 +240,13 @@ export default function MapView({ crisis = [], shelters = [], hospitals = [], us
       <div style={{
         position: "absolute", bottom: 28, right: 16, zIndex: 500,
         background: "#fff",
-        borderRadius: 12,
-        padding: "12px 16px",
+        borderRadius: 10,
+        padding: "9px 12px",
         boxShadow: "0 2px 14px rgba(0,0,0,0.16)",
         fontFamily: "Nunito, sans-serif",
-        minWidth: 150,
+        minWidth: 124,
       }}>
-        <div style={{ fontWeight: 800, fontSize: 11, color: "#1a1a2e", letterSpacing: 0.8, marginBottom: 10, textTransform: "uppercase" }}>
+        <div style={{ fontWeight: 800, fontSize: 10, color: "#1a1a2e", letterSpacing: 0.7, marginBottom: 7, textTransform: "uppercase" }}>
           Map Legend
         </div>
         <LegendRow color="#EF4444" label="High Severity" />

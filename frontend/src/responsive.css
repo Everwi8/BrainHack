@@ -15,7 +15,8 @@
   box-shadow: 0 1px 4px rgba(0, 0, 0, 0.07);
   position: sticky;
   top: 0;
-  z-index: 100;
+  /* Above the mobile dropdown (1100) and Leaflet so the bar always sits on top. */
+  z-index: 1101;
   width: 100%;
   box-sizing: border-box;
 }
@@ -52,8 +53,14 @@
   right: 0;
   background: #fff;
   box-shadow: 0 6px 24px rgba(0, 0, 0, 0.12);
-  z-index: 99;
+  /* Above Leaflet's map panes/controls (which go up to z-index 1000) so the
+     dropdown isn't hidden behind the map on the Map page. */
+  z-index: 1100;
   border-top: 1px solid #f0f0f0;
+  /* Scroll the menu itself if it's taller than the viewport (short phones /
+     long menus) instead of clipping the bottom items off-screen. */
+  max-height: calc(100vh - 64px);
+  overflow-y: auto;
 }
 
 .navbar-mobile-menu.open {
@@ -95,6 +102,37 @@
   .navbar-hamburger {
     display: flex;
   }
+  /* On mobile the username label and inline logout button are redundant (both
+     live in the hamburger menu) and crowd the bar so badly the hamburger gets
+     pushed off the right edge — hide them so it stays reachable. The logout
+     button carries an inline display:flex, so its hide needs !important. */
+  .navbar-username {
+    display: none;
+  }
+  .navbar-logout-inline {
+    display: none !important;
+  }
+}
+
+/* Logout entry in the mobile dropdown — matches the nav-link buttons but with
+   an icon and a red hover to read as a sign-out action. */
+.navbar-mobile-logout {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 16px 24px;
+  border: none;
+  border-top: 1px solid #f0f0f0;
+  background: none;
+  cursor: pointer;
+  font-family: 'Nunito', sans-serif;
+  font-size: 16px;
+  font-weight: 700;
+  color: #B42318;
+}
+
+.navbar-mobile-logout:hover {
+  background: #FEE2E2;
 }
 
 /* ── Home ────────────────────────────────────────────────────── */
@@ -244,11 +282,12 @@
 }
 
 /* On short laptop screens the mascot eats most of the left panel height,
-   leaving almost no room for the sessions list. Hide it so the sessions
-   card can grow to fill the space instead. */
+   leaving almost no room for the sessions list. Shrink it (rather than hiding
+   it) so Brainy stays visible while the sessions card still gets room to grow.
+   The inline width on the <img> needs overriding, hence !important. */
 @media (max-height: 750px) {
-  .chat-left-mascot {
-    display: none;
+  .chat-left-mascot img {
+    width: 130px !important;
   }
 }
 
@@ -261,12 +300,84 @@
   }
 }
 
+/* Mobile chat toolbar + history dropdown — hidden on desktop (the left panel
+   covers these there), shown ≤640px where the left panel is removed. */
+.chat-mobile-bar {
+  display: none;
+}
+.chat-mobile-history {
+  display: none;
+}
+
 @media (max-width: 640px) {
   .chat-layout {
     padding: 0 10px;
   }
   .chat-left-panel {
     display: none;
+  }
+  .chat-mobile-bar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    padding: 10px 4px;
+    flex-shrink: 0;
+  }
+  .chat-mobile-history {
+    display: block;
+    background: #fff;
+    border-radius: 14px;
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.12);
+    padding: 8px;
+    margin-bottom: 8px;
+    max-height: 45vh;
+    overflow-y: auto;
+    flex-shrink: 0;
+  }
+  /* On a phone the 58%/42% bubble caps are far too narrow — text wraps to one
+     or two words and bubbles grow very tall. Let them use most of the row. */
+  .taskchat-bubble-other {
+    max-width: 88% !important;
+  }
+  .taskchat-bubble-me {
+    max-width: 82% !important;
+  }
+
+  /* Give the message list more of the screen on mobile by trimming page padding
+     and shrinking the header + footer chrome around it. */
+  .taskchat-main {
+    padding: 10px 10px 14px !important;
+  }
+  .taskchat-section {
+    /* Fill the viewport below the navbar (64) + tab row + page padding. dvh
+       accounts for the mobile browser's address bar; vh is the fallback. */
+    height: calc(100vh - 120px) !important;
+    height: calc(100dvh - 120px) !important;
+  }
+  .taskchat-header {
+    padding: 12px 16px 10px !important;
+  }
+  .taskchat-title {
+    font-size: 16px !important;
+  }
+  .taskchat-meta {
+    font-size: 12px !important;
+  }
+  .taskchat-footer {
+    padding: 8px 10px !important;
+    gap: 8px !important;
+  }
+  .taskchat-iconbtn {
+    width: 46px !important;
+    height: 46px !important;
+  }
+  .taskchat-iconbtn svg {
+    width: 24px !important;
+    height: 24px !important;
+  }
+  .taskchat-input {
+    height: 46px !important;
   }
 }
 

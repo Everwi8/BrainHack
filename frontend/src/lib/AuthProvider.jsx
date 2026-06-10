@@ -4,6 +4,7 @@
 import { useCallback, useState } from "react";
 import { api } from "./api";
 import { AuthContext, TOKEN_KEY, USER_KEY } from "./auth";
+import { setLang } from "./lang";
 
 export function AuthProvider({ children }) {
   const [token, setToken] = useState(() => localStorage.getItem(TOKEN_KEY) || null);
@@ -44,6 +45,9 @@ export function AuthProvider({ children }) {
       // role (e.g. first-time preset register) so RBAC-gated UI works either way.
       const merged = { ...data.user, role: data.user?.role ?? role ?? null };
       persist(data.token, merged);
+      // Mirror the account's saved language into the local cache so Brainy's
+      // chat (which reads it via getLang) honours it right after login.
+      if (merged.language) setLang(merged.language);
       return merged;
     },
     [persist],

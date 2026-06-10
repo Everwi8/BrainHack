@@ -58,29 +58,67 @@ Safety and integrity:
 - Never invent facts. If a detail (an address, a number, a road or place name) isn't in the data you've been given, say you don't have it rather than guessing — and tell the user plainly when you're not certain.`
 )
 
-// UserContext personalises Brainy's replies with who it is talking to and
-// roughly where they are. Both fields are optional — a zero UserContext adds
-// nothing to the prompt.
+// UserContext personalises Brainy's replies with who it is talking to, roughly
+// where they are, and which language to answer in. All fields are optional — a
+// zero UserContext adds nothing to the prompt.
 type UserContext struct {
 	Name string // the user's first name, blank if unknown
 	Area string // human-readable location, e.g. "near Tampines in east Singapore"
+	Lang string // preferred reply-language code (e.g. "zh", "ms", "ta", "en-SG")
 }
 
-// systemMessage renders the personalisation into a system instruction, or "" if
-// there is nothing to personalise with.
+// supportedLanguages are the reply-language codes the profile can store.
+// Singlish ("en-SG") is the default local voice; plain English is intentionally
+// not offered. Each maps to a directive in languageInstruction.
+var supportedLanguages = map[string]bool{
+	"en-SG": true, "zh": true, "ms": true, "ta": true,
+}
+
+// IsSupportedLanguage reports whether code is one the app offers, so the profile
+// handler can reject anything else before storing it.
+func IsSupportedLanguage(code string) bool {
+	return supportedLanguages[code]
+}
+
+// languageInstruction maps a language code to a fixed reply-language directive.
+// Blank/English/unknown codes return "" (Brainy keeps its default English). The
+// mapping is a server-side whitelist on purpose: the client only ever sends a
+// short code, so it can't inject arbitrary prompt text via the language field.
+func languageInstruction(code string) string {
+	switch strings.ToLower(strings.TrimSpace(code)) {
+	case "zh", "zh-cn", "zh-sg", "cmn", "mandarin":
+		return "Reply ONLY in Mandarin Chinese (简体中文). Use simple, clear wording an elderly resident can follow. Keep Singapore emergency numbers and place names accurate (995 SCDF, 999 Police, 1800-255-0000 SPF hotline)."
+	case "ms", "ms-sg", "malay":
+		return "Reply ONLY in Malay (Bahasa Melayu). Use simple, clear wording an elderly resident can follow. Keep Singapore emergency numbers and place names accurate (995 SCDF, 999 Police, 1800-255-0000 SPF hotline)."
+	case "ta", "ta-sg", "tamil":
+		return "Reply ONLY in Tamil (தமிழ்). Use simple, clear wording an elderly resident can follow. Keep Singapore emergency numbers and place names accurate (995 SCDF, 999 Police, 1800-255-0000 SPF hotline)."
+	case "en-sg", "singlish":
+		return "Reply in friendly, colloquial Singlish (Singapore English) — natural local phrasing and particles (lah, leh, can), but stay clear, warm and respectful. Keep Singapore emergency numbers accurate (995 SCDF, 999 Police)."
+	default:
+		return "" // English / unknown → Brainy's default voice
+	}
+}
+
+// systemMessage renders the language directive + personalisation into a system
+// instruction, or "" when there's nothing to add.
 func (u UserContext) systemMessage() string {
-	if u.Name == "" && u.Area == "" {
-		return ""
-	}
 	var b strings.Builder
-	b.WriteString("You are speaking with a specific resident — personalise your replies:\n")
-	if u.Name != "" {
-		fmt.Fprintf(&b, "- Their name is %s. Greet and address them by name naturally; don't overuse it.\n", u.Name)
+	if instr := languageInstruction(u.Lang); instr != "" {
+		b.WriteString(instr)
 	}
-	if u.Area != "" {
-		fmt.Fprintf(&b, "- They are located %s. Prioritise crises, alerts, shelters and hospitals relevant to that area, and tailor distances/directions to it.\n", u.Area)
+	if u.Name != "" || u.Area != "" {
+		if b.Len() > 0 {
+			b.WriteString("\n\n")
+		}
+		b.WriteString("You are speaking with a specific resident — personalise your replies:\n")
+		if u.Name != "" {
+			fmt.Fprintf(&b, "- Their name is %s. Greet and address them by name naturally; don't overuse it.\n", u.Name)
+		}
+		if u.Area != "" {
+			fmt.Fprintf(&b, "- They are located %s. Prioritise crises, alerts, shelters and hospitals relevant to that area, and tailor distances/directions to it.\n", u.Area)
+		}
+		b.WriteString("Weave this in naturally — personalise, don't force it.")
 	}
-	b.WriteString("Weave this in naturally — personalise, don't force it.")
 	return b.String()
 }
 

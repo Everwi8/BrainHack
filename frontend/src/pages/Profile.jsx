@@ -2,10 +2,11 @@
 // their password, and manage the volunteer skills used by the "find my match"
 // flow. Name/password go to PATCH /api/auth/me; skills to POST /api/volunteers.
 import { useEffect, useState } from "react";
-import { UserCircle, ShieldCheck, Sparkles, Check } from "lucide-react";
+import { UserCircle, ShieldCheck, Sparkles, Check, Languages } from "lucide-react";
 import Navbar from "../components/layout/NavBar";
 import { useAuth } from "../lib/auth";
 import { api } from "../lib/api";
+import { LANGUAGES, getLang, setLang } from "../lib/lang";
 
 const INK = "#1a1a2e";
 
@@ -70,6 +71,12 @@ export default function Profile() {
   const [savingAccount, setSavingAccount] = useState(false);
   const [accountMsg, setAccountMsg] = useState(null); // { ok, text }
 
+  // ── Language ── (saved on the account; mirrored to local cache for the chat)
+  const [lang, setLangState] = useState(user?.language || getLang());
+  const [langMsg, setLangMsg] = useState(null);
+  const [savingLang, setSavingLang] = useState(false);
+  const [pendingLang, setPendingLang] = useState(null); // chosen-but-unconfirmed switch
+
   // ── Skills ──
   const [catalog, setCatalog] = useState([]);
   const [skills, setSkills] = useState(new Set());
@@ -82,6 +89,11 @@ export default function Profile() {
       .catch(() => {});
     api.get("/api/volunteers/me")
       .then((res) => setSkills(new Set(Array.isArray(res?.skills) ? res.skills : [])))
+      .catch(() => {});
+    // Pull the canonical saved language from the account and mirror it locally,
+    // so the picker and the chat reflect the stored value (not a stale cache).
+    api.get("/api/auth/me")
+      .then((me) => { if (me?.language) { setLangState(me.language); setLang(me.language); } })
       .catch(() => {});
   }, []);
 
@@ -113,6 +125,41 @@ export default function Profile() {
       setAccountMsg({ ok: false, text: err.message || "Could not update profile." });
     } finally {
       setSavingAccount(false);
+    }
+  };
+
+  // Clicking a language chip stages the switch; the user must confirm before it
+  // is saved, so a stray tap doesn't silently change Brainy's language.
+  const requestLang = (code) => {
+    if (savingLang || code === lang) return;
+    setLangMsg(null);
+    setPendingLang(code);
+  };
+
+  const cancelLang = () => setPendingLang(null);
+
+  const confirmLang = async () => {
+    const code = pendingLang;
+    if (!code || savingLang) return;
+    const prev = lang;
+    // Optimistic: update the UI + local cache immediately, then persist.
+    setLangState(code);
+    setLang(code);
+    setSavingLang(true);
+    setLangMsg(null);
+    try {
+      const updated = await api.patch("/api/auth/me", { language: code });
+      const saved = updated?.language ?? code;
+      updateUser({ language: saved });
+      const picked = LANGUAGES.find((l) => l.code === saved);
+      setLangMsg({ ok: true, text: `Brainy will reply in ${picked?.label || "Singlish"}.` });
+      setPendingLang(null);
+    } catch (err) {
+      setLangState(prev);
+      setLang(prev);
+      setLangMsg({ ok: false, text: err.message || "Could not save language." });
+    } finally {
+      setSavingLang(false);
     }
   };
 
@@ -175,6 +222,81 @@ export default function Profile() {
           <button onClick={saveAccount} disabled={savingAccount} style={btnStyle(savingAccount)}>
             {savingAccount ? "Saving…" : "Save changes"}
           </button>
+        </Card>
+
+        {/* Language */}
+        <Card title="Language" icon={<Languages size={16} color="#0F766E" />}>
+          <p style={{ margin: 0, fontSize: 13, color: "#6B6B6B", textAlign: "left" }}>
+            Choose the language Brainy replies in. Singapore's official languages plus Singlish.
+          </p>
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+            {LANGUAGES.map((l) => {
+              const on = l.code === lang;
+              const pending = l.code === pendingLang;
+              const border = pending ? "#D97706" : on ? "#0F766E" : "#E5E7EB";
+              const bg = pending ? "#FEF3C7" : on ? "#CCFBF1" : "#fff";
+              const fg = pending ? "#B45309" : on ? "#0F766E" : "#4B5563";
+              return (
+                <button
+                  key={l.code}
+                  onClick={() => requestLang(l.code)}
+                  disabled={savingLang}
+                  style={{
+                    border: `1.5px solid ${border}`,
+                    background: bg,
+                    color: fg,
+                    borderRadius: 999, padding: "7px 14px", fontSize: 12.5, fontWeight: 700,
+                    cursor: savingLang ? "default" : "pointer", fontFamily: "inherit",
+                    opacity: savingLang && !on ? 0.6 : 1,
+                    display: "inline-flex", alignItems: "center", gap: 6,
+                  }}
+                >
+                  {on && <Check size={13} />}
+                  {l.native}
+                  {l.native !== l.label && (
+                    <span style={{ color: fg, fontWeight: 600, opacity: 0.7 }}>· {l.label}</span>
+                  )}
+                </button>
+              );
+            })}
+          </div>
+
+          {/* Confirm before switching, so a stray tap can't change the language. */}
+          {pendingLang && (
+            <div style={{
+              display: "flex", alignItems: "center", flexWrap: "wrap", gap: 10,
+              background: "#FFFBEB", border: "1px solid #FDE68A", borderRadius: 12,
+              padding: "10px 12px",
+            }}>
+              <span style={{ fontSize: 13, fontWeight: 700, color: "#92400E", flex: 1, textAlign: "left" }}>
+                Switch Brainy's language to {LANGUAGES.find((l) => l.code === pendingLang)?.label}?
+              </span>
+              <button
+                onClick={cancelLang}
+                disabled={savingLang}
+                style={{
+                  border: "1.5px solid #D7D2C7", background: "#fff", color: "#6B7280",
+                  borderRadius: 999, padding: "7px 16px", fontSize: 12.5, fontWeight: 800,
+                  cursor: savingLang ? "default" : "pointer", fontFamily: "inherit",
+                }}
+              >
+                Cancel
+              </button>
+              <button
+                onClick={confirmLang}
+                disabled={savingLang}
+                style={{
+                  border: "none", background: "#0F766E", color: "#fff",
+                  borderRadius: 999, padding: "7px 18px", fontSize: 12.5, fontWeight: 800,
+                  cursor: savingLang ? "default" : "pointer", fontFamily: "inherit",
+                }}
+              >
+                {savingLang ? "Saving…" : "Confirm"}
+              </button>
+            </div>
+          )}
+
+          <Msg msg={langMsg} />
         </Card>
 
         {/* Skills */}

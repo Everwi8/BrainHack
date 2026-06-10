@@ -97,6 +97,7 @@ export default function Navbar() {
               onClick={handleLogout}
               title="Log out"
               aria-label="Log out"
+              className="navbar-logout-inline"
               style={{
                 background: "none", border: "none", cursor: "pointer", padding: 6,
                 borderRadius: 8, display: "flex", alignItems: "center", justifyContent: "center",
@@ -119,7 +120,9 @@ export default function Navbar() {
         </div>
       </nav>
 
-      {/* Mobile dropdown */}
+      {/* Mobile dropdown — username + logout live here on mobile (the inline
+          versions are hidden to keep the bar from overflowing the hamburger off
+          the edge on narrow phones). */}
       <div className={`navbar-mobile-menu${menuOpen ? " open" : ""}`}>
         {NAV_LINKS.map(({ label, path }) => (
           <button
@@ -130,6 +133,9 @@ export default function Navbar() {
             {label}
           </button>
         ))}
+        <button onClick={handleLogout} className="navbar-mobile-logout">
+          <LogOut size={18} color="#6B7280" /> Log out ({firstName})
+        </button>
       </div>
     </>
   );

@@ -8,6 +8,7 @@ import ChatInput from "../components/chat/ChatInput";
 import CameraCapture from "../components/chat/CameraCapture";
 import InlineCrisisCard from "../components/chat/InlineCrisisCard";
 import { api } from "../lib/api";
+import { getLang } from "../lib/lang";
 import { useVoiceRecorder, extensionFromMime } from "../lib/useVoiceRecorder";
 
 const QUICK_CHIPS = [
@@ -63,6 +64,7 @@ export default function Chat() {
   const [isTyping, setIsTyping] = useState(false);
   const [sessionId, setSessionId] = useState(null);
   const [sessions, setSessions] = useState([]);             // previous chats (sidebar)
+  const [mobileHistoryOpen, setMobileHistoryOpen] = useState(false); // mobile: previous-chats dropdown
   const [pendingImage, setPendingImage] = useState(null);   // { file, url }
   const [cameraOpen, setCameraOpen] = useState(false);      // live webcam capture modal
   const [isTranscribing, setIsTranscribing] = useState(false);
@@ -186,6 +188,7 @@ export default function Chat() {
     form.append("image", file);
     if (caption) form.append("caption", caption);
     if (sessionId) form.append("session_id", sessionId);
+    form.append("lang", getLang());
     const photoGeo = await ensureGeo();
     if (photoGeo) {
       form.append("lat", photoGeo.lat);
@@ -243,6 +246,7 @@ export default function Chat() {
       await api.postStream("/api/chat/stream", {
         message: trimmed,
         session_id: sessionId,
+        lang: getLang(),
         ...(coords ?? {}),
       }, {
         onToken: appendToken,
@@ -367,6 +371,56 @@ export default function Chat() {
     }
   };
 
+  // renderSessions draws the "previous chats" list, shared by the desktop
+  // sidebar and the mobile history dropdown. onPick fires after a row is opened
+  // (used on mobile to close the dropdown).
+  const renderSessions = (onPick) => (
+    sessions.length === 0 ? (
+      <div style={{ fontSize: 13, color: "#9CA3AF", padding: "6px 2px" }}>
+        No previous chats yet.
+      </div>
+    ) : (
+      sessions.map(s => {
+        const active = s.id === sessionId;
+        return (
+          <div
+            key={s.id}
+            onClick={() => { openSession(s.id); onPick?.(); }}
+            style={{
+              display: "flex", alignItems: "center", gap: 8,
+              padding: "9px 10px", borderRadius: 10, marginBottom: 4,
+              cursor: "pointer",
+              background: active ? "#CCFBF1" : "transparent",
+              color: active ? "#0F766E" : "#374151",
+            }}
+            onMouseEnter={e => { if (!active) e.currentTarget.style.background = "#F3F4F6"; }}
+            onMouseLeave={e => { if (!active) e.currentTarget.style.background = "transparent"; }}
+          >
+            <MessageSquare size={15} style={{ flexShrink: 0 }} />
+            <span style={{
+              flex: 1, fontSize: 13, fontWeight: 600,
+              whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis",
+            }}>
+              {s.title || "New chat"}
+            </span>
+            <button
+              onClick={(e) => deleteSession(s.id, e)}
+              title="Delete chat"
+              style={{
+                background: "none", border: "none", cursor: "pointer", padding: 3,
+                borderRadius: 6, display: "flex", flexShrink: 0, color: "#9CA3AF",
+              }}
+              onMouseEnter={e => e.currentTarget.style.color = "#DC2626"}
+              onMouseLeave={e => e.currentTarget.style.color = "#9CA3AF"}
+            >
+              <Trash2 size={14} />
+            </button>
+          </div>
+        );
+      })
+    )
+  );
+
   return (
     <div style={{
       height: "100vh", overflow: "hidden", display: "flex", flexDirection: "column",
@@ -422,50 +476,7 @@ export default function Chat() {
             </div>
 
             <div style={{ overflowY: "auto", flex: 1, minHeight: 0 }}>
-              {sessions.length === 0 ? (
-                <div style={{ fontSize: 13, color: "#9CA3AF", padding: "6px 2px" }}>
-                  No previous chats yet.
-                </div>
-              ) : (
-                sessions.map(s => {
-                  const active = s.id === sessionId;
-                  return (
-                    <div
-                      key={s.id}
-                      onClick={() => openSession(s.id)}
-                      style={{
-                        display: "flex", alignItems: "center", gap: 8,
-                        padding: "9px 10px", borderRadius: 10, marginBottom: 4,
-                        cursor: "pointer",
-                        background: active ? "#CCFBF1" : "transparent",
-                        color: active ? "#0F766E" : "#374151",
-                      }}
-                      onMouseEnter={e => { if (!active) e.currentTarget.style.background = "#F3F4F6"; }}
-                      onMouseLeave={e => { if (!active) e.currentTarget.style.background = "transparent"; }}
-                    >
-                      <MessageSquare size={15} style={{ flexShrink: 0 }} />
-                      <span style={{
-                        flex: 1, fontSize: 13, fontWeight: 600,
-                        whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis",
-                      }}>
-                        {s.title || "New chat"}
-                      </span>
-                      <button
-                        onClick={(e) => deleteSession(s.id, e)}
-                        title="Delete chat"
-                        style={{
-                          background: "none", border: "none", cursor: "pointer", padding: 3,
-                          borderRadius: 6, display: "flex", flexShrink: 0, color: "#9CA3AF",
-                        }}
-                        onMouseEnter={e => e.currentTarget.style.color = "#DC2626"}
-                        onMouseLeave={e => e.currentTarget.style.color = "#9CA3AF"}
-                      >
-                        <Trash2 size={14} />
-                      </button>
-                    </div>
-                  );
-                })
-              )}
+              {renderSessions()}
             </div>
           </div>
         </div>
@@ -475,6 +486,49 @@ export default function Chat() {
           flex: 1, display: "flex", flexDirection: "column",
           padding: "0 0 20px", overflow: "hidden",
         }}>
+          {/* Mobile-only toolbar — the desktop left panel (mascot / New chat /
+              history) is hidden ≤640px, so surface those controls here. */}
+          <div className="chat-mobile-bar">
+            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+              <BrainyMascot mood={isTyping ? "normal" : "happy"} width={36} />
+              <span style={{ fontWeight: 800, fontSize: 15, color: "#1a1a2e" }}>Brainy</span>
+            </div>
+            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+              <button
+                onClick={() => { newChat(); setMobileHistoryOpen(false); }}
+                disabled={isTyping}
+                style={{
+                  display: "flex", alignItems: "center", gap: 5,
+                  background: "#0F766E", color: "#fff", border: "none", borderRadius: 10,
+                  padding: "8px 12px", fontFamily: "'Nunito', sans-serif", fontWeight: 800,
+                  fontSize: 13, cursor: isTyping ? "not-allowed" : "pointer", opacity: isTyping ? 0.5 : 1,
+                }}
+              >
+                <Plus size={15} /> New
+              </button>
+              <button
+                onClick={() => setMobileHistoryOpen(o => !o)}
+                title="Previous chats"
+                style={{
+                  display: "flex", alignItems: "center", gap: 5,
+                  background: mobileHistoryOpen ? "#CCFBF1" : "#fff",
+                  color: "#0F766E", border: "1.5px solid #CCFBF1", borderRadius: 10,
+                  padding: "8px 12px", fontFamily: "'Nunito', sans-serif", fontWeight: 800,
+                  fontSize: 13, cursor: "pointer",
+                }}
+              >
+                <MessageSquare size={15} /> History
+              </button>
+            </div>
+          </div>
+
+          {/* Mobile history dropdown */}
+          {mobileHistoryOpen && (
+            <div className="chat-mobile-history">
+              {renderSessions(() => setMobileHistoryOpen(false))}
+            </div>
+          )}
+
           {/* Messages scroll area */}
           <div style={{ flex: 1, minHeight: 0, overflowY: "auto", padding: "8px 0 4px" }}>
             {messages.map(msg => (
