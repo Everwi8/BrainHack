@@ -93,6 +93,7 @@ export default function ReportCrisis() {
   const [detected, setDetected] = useState(null);       // { type, severity } from the vision read
   const [coords, setCoords] = useState(null);           // { lat, lng } from geolocation
   const [submitting, setSubmitting] = useState(false);
+  const [confirmSubmit, setConfirmSubmit] = useState(false);
   const [error, setError] = useState("");
   const [done, setDone] = useState(null);   // { approved } once the report posts
 
@@ -164,6 +165,7 @@ export default function ReportCrisis() {
   const beginReview = (url, dataUrl, file) => {
     setCaptured({ url, dataUrl, file });
     setStep("review");
+    setConfirmSubmit(false);
     analyze(file);
   };
 
@@ -224,8 +226,17 @@ export default function ReportCrisis() {
     }
   };
 
-  const toggleTag = (t) =>
+  const toggleTag = (t) => {
+    setConfirmSubmit(false);
     setSelectedTags((prev) => (prev.includes(t) ? prev.filter((x) => x !== t) : [...prev, t]));
+  };
+
+  // Gate posting behind an explicit second click to avoid accidental submits.
+  const requestSubmit = () => {
+    if (!captured || submitting) return;
+    setError("");
+    setConfirmSubmit(true);
+  };
 
   // submit persists the report to the backend (POST /api/crises). Residents'
   // and volunteers' reports are created 'pending' and only appear in the feed /
@@ -256,6 +267,7 @@ export default function ReportCrisis() {
       // and (for residents/volunteers) that it's awaiting coordinator approval.
       const approved = created?.approval_status === "approved";
       setDone({ approved });
+      setConfirmSubmit(false);
       setSubmitting(false);
     } catch (err) {
       setError(err.message || "Could not submit report. Please try again.");
@@ -273,6 +285,7 @@ export default function ReportCrisis() {
     setTags(DEFAULT_TAGS);
     setDetected(null);
     setError("");
+    setConfirmSubmit(false);
   };
 
   return (
@@ -416,7 +429,10 @@ export default function ReportCrisis() {
                 <FieldLabel>CAPTION</FieldLabel>
                 <textarea
                   value={caption}
-                  onChange={(e) => setCaption(e.target.value)}
+                  onChange={(e) => {
+                    setConfirmSubmit(false);
+                    setCaption(e.target.value);
+                  }}
                   placeholder="Add description..."
                   rows={4}
                   style={{
@@ -459,7 +475,10 @@ export default function ReportCrisis() {
                 <FieldLabel>LOCATION</FieldLabel>
                 <input
                   value={location}
-                  onChange={(e) => setLocation(e.target.value)}
+                  onChange={(e) => {
+                    setConfirmSubmit(false);
+                    setLocation(e.target.value);
+                  }}
                   placeholder="Add location..."
                   style={{
                     width: "100%", boxSizing: "border-box",
@@ -469,19 +488,47 @@ export default function ReportCrisis() {
                 />
               </div>
 
-              <button
-                onClick={submit}
-                disabled={submitting}
-                style={{
-                  alignSelf: "flex-start", background: "#1a1a2e", color: "#fff",
-                  border: "none", borderRadius: 10, padding: "10px 28px",
-                  fontFamily: MONO, fontWeight: 700, fontSize: 14,
-                  cursor: submitting ? "default" : "pointer",
-                  opacity: submitting ? 0.6 : 1, letterSpacing: 1,
-                }}
-              >
-                {submitting ? "POSTING…" : "POST"}
-              </button>
+              {confirmSubmit ? (
+                <div style={{ display: "inline-flex", gap: 10, alignSelf: "flex-start" }}>
+                  <button
+                    onClick={() => setConfirmSubmit(false)}
+                    disabled={submitting}
+                    style={{
+                      background: "#fff", color: "#4B5563", border: "1px solid #D1D5DB", borderRadius: 10,
+                      padding: "10px 18px", fontFamily: MONO, fontWeight: 700, fontSize: 13,
+                      cursor: submitting ? "default" : "pointer",
+                    }}
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    onClick={submit}
+                    disabled={submitting}
+                    style={{
+                      background: "#1a1a2e", color: "#fff", border: "none", borderRadius: 10,
+                      padding: "10px 22px", fontFamily: MONO, fontWeight: 700, fontSize: 13,
+                      cursor: submitting ? "default" : "pointer",
+                      opacity: submitting ? 0.6 : 1, letterSpacing: 0.8,
+                    }}
+                  >
+                    {submitting ? "POSTING…" : "CONFIRM POST"}
+                  </button>
+                </div>
+              ) : (
+                <button
+                  onClick={requestSubmit}
+                  disabled={submitting}
+                  style={{
+                    alignSelf: "flex-start", background: "#1a1a2e", color: "#fff",
+                    border: "none", borderRadius: 10, padding: "10px 28px",
+                    fontFamily: MONO, fontWeight: 700, fontSize: 14,
+                    cursor: submitting ? "default" : "pointer",
+                    opacity: submitting ? 0.6 : 1, letterSpacing: 1,
+                  }}
+                >
+                  {submitting ? "POSTING…" : "POST"}
+                </button>
+              )}
 
               {error && (
                 <div style={{ fontFamily: MONO, fontSize: 12, color: "#B91C1C" }}>{error}</div>

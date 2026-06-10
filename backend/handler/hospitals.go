@@ -32,6 +32,9 @@ var singaporeHospitals = []Hospital{
 	{"ah", "Alexandra Hospital", 1.2876, 103.8004, 454, 118, 74, "2025-01-01"},
 }
 
+// GetHospitals returns the static public-hospital list used by map/chat cards.
+// This dataset is intentionally deterministic for the demo; live bed telemetry
+// is not wired here.
 func GetHospitals(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"hospitals": singaporeHospitals})
 }

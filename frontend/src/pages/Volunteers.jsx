@@ -1,5 +1,5 @@
 // James — volunteer group chat page (tabbed by crisis, voice recording, task status tracker)
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Camera, Image as ImageIcon, Mic, Play, X } from "lucide-react";
 import Navbar from "../components/layout/NavBar";
 import { useVoiceRecorder, extensionFromMime } from "../lib/useVoiceRecorder";
@@ -150,6 +150,7 @@ export default function Volunteers() {
   const [cameraOpen, setCameraOpen] = useState(false);
   const [confirmingLeave, setConfirmingLeave] = useState(false); // header leave-task gate
   const [leaving, setLeaving] = useState(false);                 // in-flight leave
+  const [confirmDiscardPending, setConfirmDiscardPending] = useState(false);
 
   const { isRecording, recordingSeconds, start: startRecorder, stop: stopRecorder } = useVoiceRecorder();
 
@@ -267,10 +268,7 @@ export default function Volunteers() {
     setLeaving(false);
   };
 
-  // Reset the leave confirmation whenever the selected task changes.
-  useEffect(() => { setConfirmingLeave(false); }, [activeGroup]);
-
-  const mapServerMessageToUI = (msg) => {
+  const mapServerMessageToUI = useCallback((msg) => {
     const senderID = msg?.sender_user_id || "";
     const senderRole = String(msg?.sender_role || "").toLowerCase();
     const isMine = Boolean(currentUserID && senderID && senderID === currentUserID);
@@ -287,7 +285,7 @@ export default function Volunteers() {
       imageUrl: msg?.image_url || null,
       at: formatChatTime(msg?.created_at),
     };
-  };
+  }, [currentUserID]);
 
   useEffect(() => {
     if (!activeGroup) return undefined;
@@ -328,13 +326,14 @@ export default function Volunteers() {
       ignore = true;
       clearInterval(timer);
     };
-  }, [activeGroup, currentUserID]);
+  }, [activeGroup, mapServerMessageToUI]);
 
   const clearPendingVoiceClip = (nextStatus = "") => {
     if (!pendingVoiceClip?.url) return;
     URL.revokeObjectURL(pendingVoiceClip.url);
     clipUrlsRef.current = clipUrlsRef.current.filter((url) => url !== pendingVoiceClip.url);
     setPendingVoiceClip(null);
+    setConfirmDiscardPending(false);
     setVoiceStatus(nextStatus);
   };
 
@@ -344,6 +343,7 @@ export default function Volunteers() {
       imageUrlsRef.current = imageUrlsRef.current.filter((url) => url !== pendingImage.url);
     }
     setPendingImage(null);
+    setConfirmDiscardPending(false);
     setVoiceStatus(nextStatus);
   };
 
@@ -367,6 +367,7 @@ export default function Volunteers() {
     }
     clearPendingVoiceClip();
     clearPendingImage();
+    setConfirmDiscardPending(false);
     const err = await startRecorder();
     if (err) {
       setVoiceStatus(err);
@@ -530,6 +531,7 @@ export default function Volunteers() {
 
       setDraft("");
       setPendingVoiceClip(null);
+      setConfirmDiscardPending(false);
       setVoiceStatus("Voice note sent.");
     } catch (err) {
       setVoiceStatus(err?.message || "Could not send voice note.");
@@ -546,6 +548,7 @@ export default function Volunteers() {
   const handlePhotoSelected = (file) => {
     if (!file) return;
     clearPendingVoiceClip();
+    setConfirmDiscardPending(false);
     if (pendingImage?.url) {
       URL.revokeObjectURL(pendingImage.url);
       imageUrlsRef.current = imageUrlsRef.current.filter((url) => url !== pendingImage.url);
@@ -554,6 +557,21 @@ export default function Volunteers() {
     imageUrlsRef.current.push(url);
     setPendingImage({ file, url });
     setVoiceStatus(`Photo ready (${file.name}). Press send.`);
+  };
+
+  const requestDiscardPending = () => {
+    if (!pendingVoiceClip && !pendingImage) return;
+    setConfirmDiscardPending(true);
+  };
+
+  const cancelDiscardPending = () => setConfirmDiscardPending(false);
+
+  const confirmDiscard = () => {
+    if (pendingVoiceClip) {
+      clearPendingVoiceClip("Voice note deleted.");
+      return;
+    }
+    if (pendingImage) clearPendingImage("Photo removed.");
   };
 
   return (
@@ -584,7 +602,10 @@ export default function Volunteers() {
             return (
               <button
                 key={item.id}
-                onClick={() => setActiveGroup(item.id)}
+                onClick={() => {
+                  setConfirmingLeave(false);
+                  setActiveGroup(item.id);
+                }}
                 style={{
                   border: "none",
                   borderRadius: 22,
@@ -916,29 +937,61 @@ export default function Volunteers() {
               <div style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
                 <span>{statusText}</span>
                 {(pendingVoiceClip || pendingImage) && !isRecording && (
-                  <button
-                    onClick={() => {
-                      if (pendingVoiceClip) {
-                        clearPendingVoiceClip("Voice note deleted.");
-                      } else {
-                        clearPendingImage("Photo removed.");
-                      }
-                    }}
-                    style={{
-                      border: "none",
-                      background: "transparent",
-                      color: "#1E1E1E",
-                      display: "inline-flex",
-                      alignItems: "center",
-                      justifyContent: "center",
-                      padding: 0,
-                      cursor: "pointer",
-                      lineHeight: 1,
-                    }}
-                    title={pendingVoiceClip ? "Delete recorded voice note" : "Remove selected photo"}
-                  >
-                    <X size={14} />
-                  </button>
+                  confirmDiscardPending ? (
+                    <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+                      <button
+                        onClick={cancelDiscardPending}
+                        style={{
+                          border: "1px solid #D1D5DB",
+                          background: "#fff",
+                          color: "#6B7280",
+                          borderRadius: 999,
+                          padding: "2px 9px",
+                          fontSize: 11.5,
+                          fontWeight: 700,
+                          cursor: "pointer",
+                          fontFamily: "inherit",
+                        }}
+                      >
+                        Cancel
+                      </button>
+                      <button
+                        onClick={confirmDiscard}
+                        style={{
+                          border: "none",
+                          background: "#B91C1C",
+                          color: "#fff",
+                          borderRadius: 999,
+                          padding: "2px 10px",
+                          fontSize: 11.5,
+                          fontWeight: 700,
+                          cursor: "pointer",
+                          fontFamily: "inherit",
+                        }}
+                        title={pendingVoiceClip ? "Confirm delete voice note" : "Confirm remove photo"}
+                      >
+                        Confirm
+                      </button>
+                    </span>
+                  ) : (
+                    <button
+                      onClick={requestDiscardPending}
+                      style={{
+                        border: "none",
+                        background: "transparent",
+                        color: "#1E1E1E",
+                        display: "inline-flex",
+                        alignItems: "center",
+                        justifyContent: "center",
+                        padding: 0,
+                        cursor: "pointer",
+                        lineHeight: 1,
+                      }}
+                      title={pendingVoiceClip ? "Delete recorded voice note" : "Remove selected photo"}
+                    >
+                      <X size={14} />
+                    </button>
+                  )
                 )}
               </div>
             </div>

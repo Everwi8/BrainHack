@@ -294,7 +294,9 @@ function ghostBtn() {
 // toggleable chips and saves the selection before matching runs.
 function SkillsModal({ catalog, initial, saving, onSave, onClose }) {
   const [selected, setSelected] = useState(() => new Set(initial || []));
+  const [confirmSave, setConfirmSave] = useState(false);
   const toggle = (slug) => setSelected((prev) => {
+    setConfirmSave(false);
     const next = new Set(prev);
     next.has(slug) ? next.delete(slug) : next.add(slug);
     return next;
@@ -342,10 +344,21 @@ function SkillsModal({ catalog, initial, saving, onSave, onClose }) {
           })}
         </div>
         <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
-          <button onClick={onClose} disabled={saving} style={ghostBtn()}>Cancel</button>
-          <button onClick={() => onSave([...selected])} disabled={saving} style={ctaBtn("#7C3AED")}>
-            {saving ? "Saving…" : "Save & match me"}
-          </button>
+          {confirmSave ? (
+            <>
+              <button onClick={() => setConfirmSave(false)} disabled={saving} style={ghostBtn()}>Back</button>
+              <button onClick={() => onSave([...selected])} disabled={saving} style={ctaBtn("#7C3AED")}>
+                {saving ? "Saving…" : "Confirm save"}
+              </button>
+            </>
+          ) : (
+            <>
+              <button onClick={onClose} disabled={saving} style={ghostBtn()}>Cancel</button>
+              <button onClick={() => setConfirmSave(true)} disabled={saving} style={ctaBtn("#7C3AED")}>
+                Save & match me
+              </button>
+            </>
+          )}
         </div>
       </div>
     </div>

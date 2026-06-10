@@ -1,3 +1,4 @@
+// App router: central route table and auth gate wiring for all pages.
 import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import { AuthProvider } from "./lib/AuthProvider";
 import { useAuth } from "./lib/auth";
@@ -25,7 +26,9 @@ export default function App() {
       <BrowserRouter>
         <Routes>
           <Route path="/login" element={<Login />} />
-          <Route path="/" element={<Login />} />  {/* start at login */}
+          {/* Root defaults to login for the demo flow. */}
+          <Route path="/" element={<Login />} />
+          {/* Everything below this line requires a valid JWT session. */}
           <Route path="/home" element={<Protected><Home /></Protected>} />
           <Route path="/help" element={<Protected><Help /></Protected>} />
           <Route path="/map" element={<Protected><Map /></Protected>} />

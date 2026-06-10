@@ -31,6 +31,7 @@ function EditReportModal({ report, onClose, onSaved }) {
   const [severity, setSeverity] = useState(report.severity || "medium");
   const [locationName, setLocationName] = useState(report.location_name || "");
   const [saving, setSaving] = useState(false);
+  const [confirmSave, setConfirmSave] = useState(false);
   const [error, setError] = useState("");
 
   const save = async () => {
@@ -75,25 +76,52 @@ function EditReportModal({ report, onClose, onSaved }) {
 
         <div style={{ marginBottom: 14 }}>
           <div style={FIELD_LABEL}>TITLE</div>
-          <input value={title} onChange={(e) => setTitle(e.target.value)} style={FIELD} />
+          <input
+            value={title}
+            onChange={(e) => {
+              setConfirmSave(false);
+              setTitle(e.target.value);
+            }}
+            style={FIELD}
+          />
         </div>
 
         <div style={{ marginBottom: 14 }}>
           <div style={FIELD_LABEL}>DESCRIPTION</div>
-          <textarea value={description} onChange={(e) => setDescription(e.target.value)} rows={3}
+          <textarea
+            value={description}
+            onChange={(e) => {
+              setConfirmSave(false);
+              setDescription(e.target.value);
+            }}
+            rows={3}
             style={{ ...FIELD, resize: "vertical" }} />
         </div>
 
         <div style={{ display: "flex", gap: 12, marginBottom: 14 }}>
           <div style={{ flex: 1 }}>
             <div style={FIELD_LABEL}>TYPE</div>
-            <select value={type} onChange={(e) => setType(e.target.value)} style={FIELD}>
+            <select
+              value={type}
+              onChange={(e) => {
+                setConfirmSave(false);
+                setType(e.target.value);
+              }}
+              style={FIELD}
+            >
               {CRISIS_TYPES.map((t) => <option key={t} value={t}>{t}</option>)}
             </select>
           </div>
           <div style={{ flex: 1 }}>
             <div style={FIELD_LABEL}>SEVERITY</div>
-            <select value={severity} onChange={(e) => setSeverity(e.target.value)} style={FIELD}>
+            <select
+              value={severity}
+              onChange={(e) => {
+                setConfirmSave(false);
+                setSeverity(e.target.value);
+              }}
+              style={FIELD}
+            >
               {SEVERITIES.map((s) => <option key={s} value={s}>{s}</option>)}
             </select>
           </div>
@@ -101,7 +129,14 @@ function EditReportModal({ report, onClose, onSaved }) {
 
         <div style={{ marginBottom: 18 }}>
           <div style={FIELD_LABEL}>LOCATION</div>
-          <input value={locationName} onChange={(e) => setLocationName(e.target.value)} style={FIELD} />
+          <input
+            value={locationName}
+            onChange={(e) => {
+              setConfirmSave(false);
+              setLocationName(e.target.value);
+            }}
+            style={FIELD}
+          />
         </div>
 
         {error && <div style={{ color: "#B91C1C", fontSize: 13, marginBottom: 12 }}>{error}</div>}
@@ -115,15 +150,44 @@ function EditReportModal({ report, onClose, onSaved }) {
             }}>
             Cancel
           </button>
-          <button onClick={save} disabled={saving}
-            style={{
-              background: "#1a1a2e", color: "#fff", border: "none", borderRadius: 8,
-              padding: "9px 20px", fontWeight: 700, fontSize: 13,
-              cursor: saving ? "default" : "pointer", opacity: saving ? 0.6 : 1,
-              fontFamily: "'Nunito', sans-serif",
-            }}>
-            {saving ? "Saving…" : "Save changes"}
-          </button>
+          {confirmSave ? (
+            <>
+              <button
+                onClick={() => setConfirmSave(false)}
+                disabled={saving}
+                style={{
+                  background: "#fff", color: "#6B7280", border: "1px solid #D1D5DB", borderRadius: 8,
+                  padding: "9px 16px", fontWeight: 700, fontSize: 13,
+                  cursor: saving ? "default" : "pointer", opacity: saving ? 0.6 : 1,
+                  fontFamily: "'Nunito', sans-serif",
+                }}
+              >
+                Back
+              </button>
+              <button onClick={save} disabled={saving}
+                style={{
+                  background: "#1a1a2e", color: "#fff", border: "none", borderRadius: 8,
+                  padding: "9px 20px", fontWeight: 700, fontSize: 13,
+                  cursor: saving ? "default" : "pointer", opacity: saving ? 0.6 : 1,
+                  fontFamily: "'Nunito', sans-serif",
+                }}>
+                {saving ? "Saving…" : "Confirm save"}
+              </button>
+            </>
+          ) : (
+            <button
+              onClick={() => setConfirmSave(true)}
+              disabled={saving}
+              style={{
+                background: "#1a1a2e", color: "#fff", border: "none", borderRadius: 8,
+                padding: "9px 20px", fontWeight: 700, fontSize: 13,
+                cursor: saving ? "default" : "pointer", opacity: saving ? 0.6 : 1,
+                fontFamily: "'Nunito', sans-serif",
+              }}
+            >
+              Save changes
+            </button>
+          )}
         </div>
       </div>
     </div>
@@ -182,6 +246,7 @@ export function ApprovalContainer() {
   const [pending, setPending] = useState([]);
   const [loading, setLoading] = useState(true);
   const [busyId, setBusyId] = useState(null);
+  const [confirming, setConfirming] = useState(null); // {id, action} | null
 
   useEffect(() => {
     api.get("/api/crises/pending")
@@ -199,6 +264,7 @@ export function ApprovalContainer() {
       console.error(action, err);
     } finally {
       setBusyId(null);
+      setConfirming(null);
     }
   };
 
@@ -214,30 +280,62 @@ export function ApprovalContainer() {
             </p>
           )}
           <div style={{ display: "flex", gap: 8 }}>
-            <button
-              onClick={() => act(r.id, "approve")}
-              disabled={busyId === r.id}
-              style={{
-                display: "flex", alignItems: "center", gap: 5,
-                background: "#16A34A", color: "#fff", border: "none", borderRadius: 8,
-                padding: "7px 14px", fontFamily: "'Nunito', sans-serif", fontWeight: 700, fontSize: 12,
-                cursor: busyId === r.id ? "default" : "pointer", opacity: busyId === r.id ? 0.6 : 1,
-              }}
-            >
-              <Check size={13} /> Approve
-            </button>
-            <button
-              onClick={() => act(r.id, "reject")}
-              disabled={busyId === r.id}
-              style={{
-                display: "flex", alignItems: "center", gap: 5,
-                background: "none", color: "#B91C1C", border: "1px solid #FCA5A5", borderRadius: 8,
-                padding: "7px 14px", fontFamily: "'Nunito', sans-serif", fontWeight: 700, fontSize: 12,
-                cursor: busyId === r.id ? "default" : "pointer", opacity: busyId === r.id ? 0.6 : 1,
-              }}
-            >
-              <X size={13} /> Reject
-            </button>
+            {confirming?.id === r.id ? (
+              <>
+                <button
+                  onClick={() => setConfirming(null)}
+                  disabled={busyId === r.id}
+                  style={{
+                    display: "flex", alignItems: "center", gap: 5,
+                    background: "#fff", color: "#6B7280", border: "1px solid #D1D5DB", borderRadius: 8,
+                    padding: "7px 12px", fontFamily: "'Nunito', sans-serif", fontWeight: 700, fontSize: 12,
+                    cursor: busyId === r.id ? "default" : "pointer", opacity: busyId === r.id ? 0.6 : 1,
+                  }}
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={() => act(r.id, confirming.action)}
+                  disabled={busyId === r.id}
+                  style={{
+                    display: "flex", alignItems: "center", gap: 5,
+                    background: confirming.action === "approve" ? "#16A34A" : "#B91C1C",
+                    color: "#fff", border: "none", borderRadius: 8,
+                    padding: "7px 12px", fontFamily: "'Nunito', sans-serif", fontWeight: 700, fontSize: 12,
+                    cursor: busyId === r.id ? "default" : "pointer", opacity: busyId === r.id ? 0.6 : 1,
+                  }}
+                >
+                  {busyId === r.id ? "Working…" : `Confirm ${confirming.action}`}
+                </button>
+              </>
+            ) : (
+              <>
+                <button
+                  onClick={() => setConfirming({ id: r.id, action: "approve" })}
+                  disabled={busyId === r.id}
+                  style={{
+                    display: "flex", alignItems: "center", gap: 5,
+                    background: "#16A34A", color: "#fff", border: "none", borderRadius: 8,
+                    padding: "7px 14px", fontFamily: "'Nunito', sans-serif", fontWeight: 700, fontSize: 12,
+                    cursor: busyId === r.id ? "default" : "pointer", opacity: busyId === r.id ? 0.6 : 1,
+                  }}
+                >
+                  <Check size={13} /> Approve
+                </button>
+                <button
+                  onClick={() => setConfirming({ id: r.id, action: "reject" })}
+                  disabled={busyId === r.id}
+                  style={{
+                    display: "flex", alignItems: "center", gap: 5,
+                    background: "none", color: "#B91C1C", border: "1px solid #FCA5A5", borderRadius: 8,
+                    padding: "7px 14px", fontFamily: "'Nunito', sans-serif", fontWeight: 700, fontSize: 12,
+                    cursor: busyId === r.id ? "default" : "pointer", opacity: busyId === r.id ? 0.6 : 1,
+                  }}
+                >
+                  <X size={13} /> Reject
+                </button>
+              </>
+            )}
           </div>
         </ReportRow>
       ))}

@@ -1,3 +1,6 @@
+// STT client for voice-note transcription. The volunteers/chat voice flows post
+// uploaded audio here; this module forwards bytes to an OpenAI-compatible
+// /audio/transcriptions endpoint and returns plain text.
 package lib
 
 import (
@@ -22,6 +25,7 @@ type sttJSONResponse struct {
 	Text string `json:"text"`
 }
 
+// sttConfig resolves API credentials and endpoint defaults from env vars.
 func sttConfig() (apiKey, baseURL, model string) {
 	apiKey = os.Getenv("STT_API_KEY")
 	baseURL = os.Getenv("STT_BASE_URL")
@@ -36,6 +40,7 @@ func sttConfig() (apiKey, baseURL, model string) {
 	return
 }
 
+// sttTimeout is the per-request timeout, overridable for slow links/providers.
 func sttTimeout() time.Duration {
 	if v := os.Getenv("STT_TIMEOUT_SECONDS"); v != "" {
 		if n, err := strconv.Atoi(v); err == nil && n > 0 {

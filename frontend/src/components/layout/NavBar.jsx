@@ -17,15 +17,21 @@ export default function Navbar() {
   const location = useLocation();
   const { user, logout } = useAuth();
   const [menuOpen, setMenuOpen] = useState(false);
+  const [confirmLogoutDesktop, setConfirmLogoutDesktop] = useState(false);
+  const [confirmLogoutMobile, setConfirmLogoutMobile] = useState(false);
 
   const handleNav = (path) => {
     navigate(path);
     setMenuOpen(false);
+    setConfirmLogoutDesktop(false);
+    setConfirmLogoutMobile(false);
   };
 
   const handleLogout = () => {
     logout();
     navigate("/login");
+    setConfirmLogoutDesktop(false);
+    setConfirmLogoutMobile(false);
   };
 
   const firstName = user?.name?.split(" ")[0] ?? "Guest";
@@ -93,26 +99,56 @@ export default function Navbar() {
             <span style={{ fontSize: 14, fontWeight: 700, color: "#1a1a2e" }} className="navbar-username">
               {firstName}
             </span>
-            <button
-              onClick={handleLogout}
-              title="Log out"
-              aria-label="Log out"
-              className="navbar-logout-inline"
-              style={{
-                background: "none", border: "none", cursor: "pointer", padding: 6,
-                borderRadius: 8, display: "flex", alignItems: "center", justifyContent: "center",
-              }}
-              onMouseEnter={e => e.currentTarget.style.background = "#F3F4F6"}
-              onMouseLeave={e => e.currentTarget.style.background = "none"}
-            >
-              <LogOut size={18} color="#6B7280" />
-            </button>
+            {confirmLogoutDesktop ? (
+              <span className="navbar-logout-inline" style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+                <button
+                  onClick={(e) => { e.stopPropagation(); setConfirmLogoutDesktop(false); }}
+                  title="Cancel logout"
+                  style={{
+                    background: "none", border: "1px solid #D1D5DB", cursor: "pointer", padding: "4px 8px",
+                    borderRadius: 8, fontSize: 12, fontWeight: 700, color: "#6B7280", fontFamily: "'Nunito', sans-serif",
+                  }}
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={(e) => { e.stopPropagation(); handleLogout(); }}
+                  title="Confirm logout"
+                  aria-label="Confirm logout"
+                  style={{
+                    background: "#EF4444", border: "none", cursor: "pointer", padding: "5px 9px",
+                    borderRadius: 8, display: "flex", alignItems: "center", justifyContent: "center",
+                    color: "#fff",
+                  }}
+                >
+                  <LogOut size={15} />
+                </button>
+              </span>
+            ) : (
+              <button
+                onClick={(e) => { e.stopPropagation(); setConfirmLogoutDesktop(true); }}
+                title="Log out"
+                aria-label="Log out"
+                className="navbar-logout-inline"
+                style={{
+                  background: "none", border: "none", cursor: "pointer", padding: 6,
+                  borderRadius: 8, display: "flex", alignItems: "center", justifyContent: "center",
+                }}
+                onMouseEnter={e => e.currentTarget.style.background = "#F3F4F6"}
+                onMouseLeave={e => e.currentTarget.style.background = "none"}
+              >
+                <LogOut size={18} color="#6B7280" />
+              </button>
+            )}
           </div>
 
           {/* Hamburger — hidden on desktop via CSS */}
           <button
             className="navbar-hamburger"
-            onClick={() => setMenuOpen(o => !o)}
+            onClick={() => {
+              setMenuOpen((o) => !o);
+              setConfirmLogoutMobile(false);
+            }}
             aria-label={menuOpen ? "Close menu" : "Open menu"}
           >
             {menuOpen ? <X size={24} /> : <Menu size={24} />}
@@ -133,9 +169,31 @@ export default function Navbar() {
             {label}
           </button>
         ))}
-        <button onClick={handleLogout} className="navbar-mobile-logout">
-          <LogOut size={18} color="#6B7280" /> Log out ({firstName})
-        </button>
+        {confirmLogoutMobile ? (
+          <div style={{ display: "flex", gap: 8, paddingTop: 8 }}>
+            <button
+              onClick={() => setConfirmLogoutMobile(false)}
+              className="navbar-mobile-logout"
+              style={{ flex: 1, justifyContent: "center" }}
+            >
+              Cancel
+            </button>
+            <button
+              onClick={handleLogout}
+              className="navbar-mobile-logout"
+              style={{
+                flex: 1, justifyContent: "center",
+                borderColor: "#FCA5A5", color: "#B91C1C",
+              }}
+            >
+              <LogOut size={16} color="#B91C1C" /> Confirm
+            </button>
+          </div>
+        ) : (
+          <button onClick={() => setConfirmLogoutMobile(true)} className="navbar-mobile-logout">
+            <LogOut size={18} color="#6B7280" /> Log out ({firstName})
+          </button>
+        )}
       </div>
     </>
   );

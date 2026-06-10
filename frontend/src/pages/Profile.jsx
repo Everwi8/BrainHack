@@ -69,6 +69,7 @@ export default function Profile() {
   const [password, setPassword] = useState("");
   const [confirm, setConfirm] = useState("");
   const [savingAccount, setSavingAccount] = useState(false);
+  const [confirmAccountSave, setConfirmAccountSave] = useState(false);
   const [accountMsg, setAccountMsg] = useState(null); // { ok, text }
 
   // ── Language ── (saved on the account; mirrored to local cache for the chat)
@@ -81,6 +82,7 @@ export default function Profile() {
   const [catalog, setCatalog] = useState([]);
   const [skills, setSkills] = useState(new Set());
   const [savingSkills, setSavingSkills] = useState(false);
+  const [confirmSkillsSave, setConfirmSkillsSave] = useState(false);
   const [skillsMsg, setSkillsMsg] = useState(null);
 
   useEffect(() => {
@@ -97,6 +99,31 @@ export default function Profile() {
       .catch(() => {});
   }, []);
 
+  const buildAccountPayload = () => {
+    const payload = {};
+    if (name.trim() && name.trim() !== user?.name) payload.name = name.trim();
+    if (password) payload.password = password;
+    return payload;
+  };
+
+  const requestSaveAccount = () => {
+    setAccountMsg(null);
+    if (password && password !== confirm) {
+      setAccountMsg({ ok: false, text: "Passwords don't match." });
+      return;
+    }
+    if (password && password.length < 6) {
+      setAccountMsg({ ok: false, text: "Password must be at least 6 characters." });
+      return;
+    }
+    const payload = buildAccountPayload();
+    if (Object.keys(payload).length === 0) {
+      setAccountMsg({ ok: false, text: "Nothing to update." });
+      return;
+    }
+    setConfirmAccountSave(true);
+  };
+
   const saveAccount = async () => {
     setAccountMsg(null);
     if (password && password !== confirm) {
@@ -107,11 +134,10 @@ export default function Profile() {
       setAccountMsg({ ok: false, text: "Password must be at least 6 characters." });
       return;
     }
-    const payload = {};
-    if (name.trim() && name.trim() !== user?.name) payload.name = name.trim();
-    if (password) payload.password = password;
+    const payload = buildAccountPayload();
     if (Object.keys(payload).length === 0) {
       setAccountMsg({ ok: false, text: "Nothing to update." });
+      setConfirmAccountSave(false);
       return;
     }
     setSavingAccount(true);
@@ -121,6 +147,7 @@ export default function Profile() {
       setPassword("");
       setConfirm("");
       setAccountMsg({ ok: true, text: "Profile updated." });
+      setConfirmAccountSave(false);
     } catch (err) {
       setAccountMsg({ ok: false, text: err.message || "Could not update profile." });
     } finally {
@@ -163,11 +190,19 @@ export default function Profile() {
     }
   };
 
-  const toggleSkill = (slug) => setSkills((prev) => {
-    const next = new Set(prev);
-    next.has(slug) ? next.delete(slug) : next.add(slug);
-    return next;
-  });
+  const toggleSkill = (slug) => {
+    setConfirmSkillsSave(false);
+    setSkills((prev) => {
+      const next = new Set(prev);
+      next.has(slug) ? next.delete(slug) : next.add(slug);
+      return next;
+    });
+  };
+
+  const requestSaveSkills = () => {
+    setSkillsMsg(null);
+    setConfirmSkillsSave(true);
+  };
 
   const saveSkills = async () => {
     setSkillsMsg(null);
@@ -175,6 +210,7 @@ export default function Profile() {
     try {
       await api.post("/api/volunteers", { skills: [...skills] });
       setSkillsMsg({ ok: true, text: "Skills saved." });
+      setConfirmSkillsSave(false);
     } catch (err) {
       setSkillsMsg({ ok: false, text: err.message || "Could not save skills." });
     } finally {
@@ -207,21 +243,67 @@ export default function Profile() {
         {/* Account */}
         <Card title="Account" icon={<ShieldCheck size={16} color="#92400E" />}>
           <Field label="DISPLAY NAME">
-            <input value={name} onChange={(e) => setName(e.target.value)} style={inputStyle} placeholder="Your name" />
+            <input
+              value={name}
+              onChange={(e) => {
+                setConfirmAccountSave(false);
+                setName(e.target.value);
+              }}
+              style={inputStyle}
+              placeholder="Your name"
+            />
           </Field>
           <Field label="EMAIL">
             <input value={user?.email ?? ""} disabled style={{ ...inputStyle, background: "#F3F4F6", color: "#9CA3AF" }} />
           </Field>
           <Field label="NEW PASSWORD">
-            <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} style={inputStyle} placeholder="Leave blank to keep current" autoComplete="new-password" />
+            <input
+              type="password"
+              value={password}
+              onChange={(e) => {
+                setConfirmAccountSave(false);
+                setPassword(e.target.value);
+              }}
+              style={inputStyle}
+              placeholder="Leave blank to keep current"
+              autoComplete="new-password"
+            />
           </Field>
           <Field label="CONFIRM NEW PASSWORD">
-            <input type="password" value={confirm} onChange={(e) => setConfirm(e.target.value)} style={inputStyle} placeholder="Re-enter new password" autoComplete="new-password" />
+            <input
+              type="password"
+              value={confirm}
+              onChange={(e) => {
+                setConfirmAccountSave(false);
+                setConfirm(e.target.value);
+              }}
+              style={inputStyle}
+              placeholder="Re-enter new password"
+              autoComplete="new-password"
+            />
           </Field>
           <Msg msg={accountMsg} />
-          <button onClick={saveAccount} disabled={savingAccount} style={btnStyle(savingAccount)}>
-            {savingAccount ? "Saving…" : "Save changes"}
-          </button>
+          {confirmAccountSave ? (
+            <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+              <button
+                onClick={() => setConfirmAccountSave(false)}
+                disabled={savingAccount}
+                style={{
+                  ...btnStyle(savingAccount),
+                  background: "#fff", color: "#6B7280", border: "1px solid #D1D5DB", padding: "10px 18px",
+                }}
+              >
+                Cancel
+              </button>
+              <button onClick={saveAccount} disabled={savingAccount} style={btnStyle(savingAccount)}>
+                {savingAccount ? "Saving…" : "Confirm save"}
+              </button>
+            </div>
+          ) : (
+            <button onClick={requestSaveAccount} disabled={savingAccount} style={btnStyle(savingAccount)}>
+              Save changes
+            </button>
+          )}
         </Card>
 
         {/* Language */}
@@ -327,9 +409,27 @@ export default function Profile() {
             })}
           </div>
           <Msg msg={skillsMsg} />
-          <button onClick={saveSkills} disabled={savingSkills} style={btnStyle(savingSkills)}>
-            {savingSkills ? "Saving…" : "Save skills"}
-          </button>
+          {confirmSkillsSave ? (
+            <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+              <button
+                onClick={() => setConfirmSkillsSave(false)}
+                disabled={savingSkills}
+                style={{
+                  ...btnStyle(savingSkills),
+                  background: "#fff", color: "#6B7280", border: "1px solid #D1D5DB", padding: "10px 18px",
+                }}
+              >
+                Cancel
+              </button>
+              <button onClick={saveSkills} disabled={savingSkills} style={btnStyle(savingSkills)}>
+                {savingSkills ? "Saving…" : "Confirm save"}
+              </button>
+            </div>
+          ) : (
+            <button onClick={requestSaveSkills} disabled={savingSkills} style={btnStyle(savingSkills)}>
+              Save skills
+            </button>
+          )}
         </Card>
       </div>
     </div>

@@ -64,6 +64,7 @@ export default function Chat() {
   const [isTyping, setIsTyping] = useState(false);
   const [sessionId, setSessionId] = useState(null);
   const [sessions, setSessions] = useState([]);             // previous chats (sidebar)
+  const [confirmDeleteSessionId, setConfirmDeleteSessionId] = useState(null);
   const [mobileHistoryOpen, setMobileHistoryOpen] = useState(false); // mobile: previous-chats dropdown
   const [pendingImage, setPendingImage] = useState(null);   // { file, url }
   const [cameraOpen, setCameraOpen] = useState(false);      // live webcam capture modal
@@ -130,11 +131,13 @@ export default function Chat() {
     setSessionId(null);
     setMessages([]);
     setInput("");
+    setConfirmDeleteSessionId(null);
   };
 
   // openSession loads a past conversation's transcript into the view.
   const openSession = async (id) => {
     if (isTyping || id === sessionId) return;
+    setConfirmDeleteSessionId(null);
     try {
       const res = await api.get(`/api/chat/sessions/${id}`);
       setSessionId(res.id);
@@ -147,6 +150,12 @@ export default function Chat() {
     }
   };
 
+  // Request deletion first, then require an explicit confirmation click.
+  const requestDeleteSession = (id, e) => {
+    e.stopPropagation();
+    setConfirmDeleteSessionId(id);
+  };
+
   // deleteSession removes a past conversation; if it's the open one, reset.
   const deleteSession = async (id, e) => {
     e.stopPropagation();
@@ -156,6 +165,8 @@ export default function Chat() {
       if (id === sessionId) newChat();
     } catch {
       /* ignore — leave the list as-is on failure */
+    } finally {
+      setConfirmDeleteSessionId(null);
     }
   };
 
@@ -404,7 +415,7 @@ export default function Chat() {
               {s.title || "New chat"}
             </span>
             <button
-              onClick={(e) => deleteSession(s.id, e)}
+              onClick={(e) => requestDeleteSession(s.id, e)}
               title="Delete chat"
               style={{
                 background: "none", border: "none", cursor: "pointer", padding: 3,
@@ -415,6 +426,30 @@ export default function Chat() {
             >
               <Trash2 size={14} />
             </button>
+            {confirmDeleteSessionId === s.id && (
+              <span style={{ display: "inline-flex", gap: 4, flexShrink: 0 }}>
+                <button
+                  onClick={(e) => { e.stopPropagation(); setConfirmDeleteSessionId(null); }}
+                  style={{
+                    background: "#fff", border: "1px solid #D1D5DB", cursor: "pointer",
+                    borderRadius: 6, padding: "2px 6px", fontSize: 11, fontWeight: 700, color: "#6B7280",
+                    fontFamily: "'Nunito', sans-serif",
+                  }}
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={(e) => deleteSession(s.id, e)}
+                  style={{
+                    background: "#FEE2E2", border: "1px solid #FCA5A5", cursor: "pointer",
+                    borderRadius: 6, padding: "2px 6px", fontSize: 11, fontWeight: 800, color: "#B91C1C",
+                    fontFamily: "'Nunito', sans-serif",
+                  }}
+                >
+                  Confirm
+                </button>
+              </span>
+            )}
           </div>
         );
       })

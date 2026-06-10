@@ -181,7 +181,7 @@ function TagIcon({ type, color }) {
   return <Zap size={13} color={color} style={{ marginRight: 4 }} />;
 }
 
-function FeedCard({ item, onOpen, isCoordinator, onResolve, resolving }) {
+function FeedCard({ item, onOpen, isCoordinator, onResolveRequest, onResolveConfirm, resolving, confirmingResolve }) {
   const resolved = item.status === "resolved";
   return (
     <div style={{
@@ -266,19 +266,50 @@ function FeedCard({ item, onOpen, isCoordinator, onResolve, resolving }) {
           {/* Coordinators can mark an active crisis resolved once help is done.
               It then sinks to the end of the feed and drops off the map. */}
           {isCoordinator && !resolved && item.crisisId && (
-            <button
-              onClick={() => onResolve?.(item.crisisId)}
-              disabled={resolving}
-              style={{
-                display: "flex", alignItems: "center", gap: 5,
-                padding: "8px 16px", borderRadius: 24,
-                border: "1px solid #16A34A", background: "none", color: "#15803D",
-                fontFamily: "'Nunito', sans-serif", fontWeight: 700, fontSize: 13,
-                cursor: resolving ? "default" : "pointer", opacity: resolving ? 0.6 : 1,
-              }}
-            >
-              <CheckCircle2 size={14} /> {resolving ? "Resolving…" : "Resolve"}
-            </button>
+            confirmingResolve ? (
+              <span style={{ display: "inline-flex", gap: 6 }}>
+                <button
+                  onClick={() => onResolveRequest?.(null)}
+                  disabled={resolving}
+                  style={{
+                    display: "flex", alignItems: "center", gap: 5,
+                    padding: "8px 14px", borderRadius: 24,
+                    border: "1px solid #D1D5DB", background: "#fff", color: "#6B7280",
+                    fontFamily: "'Nunito', sans-serif", fontWeight: 700, fontSize: 13,
+                    cursor: resolving ? "default" : "pointer", opacity: resolving ? 0.6 : 1,
+                  }}
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={() => onResolveConfirm?.(item.crisisId)}
+                  disabled={resolving}
+                  style={{
+                    display: "flex", alignItems: "center", gap: 5,
+                    padding: "8px 16px", borderRadius: 24,
+                    border: "1px solid #16A34A", background: "#16A34A", color: "#fff",
+                    fontFamily: "'Nunito', sans-serif", fontWeight: 700, fontSize: 13,
+                    cursor: resolving ? "default" : "pointer", opacity: resolving ? 0.6 : 1,
+                  }}
+                >
+                  <CheckCircle2 size={14} /> {resolving ? "Resolving…" : "Confirm"}
+                </button>
+              </span>
+            ) : (
+              <button
+                onClick={() => onResolveRequest?.(item.crisisId)}
+                disabled={resolving}
+                style={{
+                  display: "flex", alignItems: "center", gap: 5,
+                  padding: "8px 16px", borderRadius: 24,
+                  border: "1px solid #16A34A", background: "none", color: "#15803D",
+                  fontFamily: "'Nunito', sans-serif", fontWeight: 700, fontSize: 13,
+                  cursor: resolving ? "default" : "pointer", opacity: resolving ? 0.6 : 1,
+                }}
+              >
+                <CheckCircle2 size={14} /> Resolve
+              </button>
+            )
           )}
           <button
             onClick={() => item.crisisId && onOpen?.(item.crisisId)}
@@ -319,6 +350,7 @@ export default function Timeline() {
   const [loading, setLoading] = useState(true);
   const [failed, setFailed] = useState(false);
   const [resolvingId, setResolvingId] = useState(null);
+  const [confirmResolveId, setConfirmResolveId] = useState(null);
 
   // "Near you" panel — civic resources (shelter / hospital / AEDs) from OneMap,
   // keyed to the user's location. Best-effort: stays null if geolocation is
@@ -351,10 +383,17 @@ export default function Timeline() {
     loadFeed().finally(() => setLoading(false));
   }, [loadFeed]);
 
-  const openCrisis = (id) => navigate(`/crises/${id}`);
+  const openCrisis = (id) => {
+    setConfirmResolveId(null);
+    navigate(`/crises/${id}`);
+  };
 
   // Coordinator resolves a crisis → it leaves the map and re-sorts to the feed
   // end. Refetch so the new order/status comes straight from the backend.
+  const requestResolve = (id) => {
+    setConfirmResolveId(id ?? null);
+  };
+
   const resolveCrisis = async (id) => {
     setResolvingId(id);
     try {
@@ -364,6 +403,7 @@ export default function Timeline() {
       console.error("resolve crisis:", err);
     } finally {
       setResolvingId(null);
+      setConfirmResolveId(null);
     }
   };
   // On a backend failure, fall back to the static sample feed so the page isn't
@@ -458,8 +498,10 @@ export default function Timeline() {
                 item={item}
                 onOpen={openCrisis}
                 isCoordinator={isCoordinator}
-                onResolve={resolveCrisis}
+                onResolveRequest={requestResolve}
+                onResolveConfirm={resolveCrisis}
                 resolving={resolvingId === item.crisisId}
+                confirmingResolve={confirmResolveId === item.crisisId}
               />
             ))
           )}

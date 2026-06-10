@@ -78,6 +78,7 @@ export default function Map() {
   // Demo/live data-source toggle (backed by /api/admin/data-source).
   const [mode, setMode]           = useState(null);  // "demo" | "live" | null while unknown
   const [switching, setSwitching] = useState(false);
+  const [confirmSwitchMode, setConfirmSwitchMode] = useState(false);
 
   // loadCrises pulls the live crisis list from the backend.
   const loadCrises = useCallback(async () => {
@@ -138,6 +139,7 @@ export default function Map() {
       console.error("toggle data source:", err);
     } finally {
       setSwitching(false);
+      setConfirmSwitchMode(false);
     }
   }, [mode, switching, loadCrises]);
 
@@ -169,27 +171,64 @@ export default function Map() {
 
         {/* Demo/live data-source toggle. Hidden until we know the current mode. */}
         {mode && (
-          <button
-            onClick={handleToggleMode}
-            disabled={switching}
-            title={mode === "demo"
-              ? "Showing the seeded demo scenario. Click to switch to live data."
-              : "Showing live cross-agency feeds. Click to switch to the demo scenario."}
-            style={{
-              marginLeft: "auto",
-              display: "flex", alignItems: "center", gap: 7,
-              background: mode === "demo" ? "#FCE7F3" : "#E6F0EC",
-              border: `1px solid ${mode === "demo" ? "#DB2777" : "#14532D"}33`,
-              borderRadius: 20, padding: "7px 16px",
-              fontFamily: "'Nunito', sans-serif", fontSize: 13, fontWeight: 700,
-              color: mode === "demo" ? "#9D174D" : "#14532D",
-              cursor: switching ? "default" : "pointer",
-              opacity: switching ? 0.6 : 1, whiteSpace: "nowrap",
-            }}
-          >
-            {mode === "demo" ? <FlaskConical size={14} /> : <Radio size={14} />}
-            <span>{switching ? "Switching…" : `Data: ${mode === "demo" ? "Demo" : "Live"}`}</span>
-          </button>
+          confirmSwitchMode ? (
+            <span style={{ marginLeft: "auto", display: "inline-flex", alignItems: "center", gap: 8 }}>
+              <button
+                onClick={() => setConfirmSwitchMode(false)}
+                disabled={switching}
+                style={{
+                  display: "flex", alignItems: "center", gap: 6,
+                  background: "#fff",
+                  border: "1px solid #D1D5DB",
+                  borderRadius: 20, padding: "7px 14px",
+                  fontFamily: "'Nunito', sans-serif", fontSize: 13, fontWeight: 700,
+                  color: "#6B7280",
+                  cursor: switching ? "default" : "pointer",
+                }}
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleToggleMode}
+                disabled={switching}
+                style={{
+                  display: "flex", alignItems: "center", gap: 6,
+                  background: mode === "demo" ? "#9D174D" : "#14532D",
+                  border: "none",
+                  borderRadius: 20, padding: "7px 14px",
+                  fontFamily: "'Nunito', sans-serif", fontSize: 13, fontWeight: 700,
+                  color: "#fff",
+                  cursor: switching ? "default" : "pointer",
+                  opacity: switching ? 0.6 : 1,
+                  whiteSpace: "nowrap",
+                }}
+              >
+                {switching ? "Switching…" : "Confirm switch"}
+              </button>
+            </span>
+          ) : (
+            <button
+              onClick={() => setConfirmSwitchMode(true)}
+              disabled={switching}
+              title={mode === "demo"
+                ? "Showing the seeded demo scenario. Click to switch to live data."
+                : "Showing live cross-agency feeds. Click to switch to the demo scenario."}
+              style={{
+                marginLeft: "auto",
+                display: "flex", alignItems: "center", gap: 7,
+                background: mode === "demo" ? "#FCE7F3" : "#E6F0EC",
+                border: `1px solid ${mode === "demo" ? "#DB2777" : "#14532D"}33`,
+                borderRadius: 20, padding: "7px 16px",
+                fontFamily: "'Nunito', sans-serif", fontSize: 13, fontWeight: 700,
+                color: mode === "demo" ? "#9D174D" : "#14532D",
+                cursor: switching ? "default" : "pointer",
+                opacity: switching ? 0.6 : 1, whiteSpace: "nowrap",
+              }}
+            >
+              {mode === "demo" ? <FlaskConical size={14} /> : <Radio size={14} />}
+              <span>{switching ? "Switching…" : `Data: ${mode === "demo" ? "Demo" : "Live"}`}</span>
+            </button>
+          )
         )}
       </div>
 

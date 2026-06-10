@@ -7,6 +7,9 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
+// Health is a lightweight readiness endpoint used by local/dev checks.
+// It confirms the server is up and reports whether required env vars are set
+// (without exposing their secret values).
 func Health(c *gin.Context) {
 	set := func(key string) bool { return os.Getenv(key) != "" }
 	c.JSON(http.StatusOK, gin.H{

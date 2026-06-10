@@ -9,6 +9,7 @@ chats. "Brainy" is the in-app assistant that answers questions over the live
 situation via text, photo, or voice.
 
 See [`architecture.md`](architecture.md) for a system diagram.
+See [`CODEBASE_FEATURES_AND_RULES.md`](CODEBASE_FEATURES_AND_RULES.md) for a full feature/rules/file reference.
 
 ---
 

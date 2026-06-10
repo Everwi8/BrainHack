@@ -7,6 +7,8 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
+// CORS applies the configured frontend origin and standard API methods/headers
+// so browser requests from the Vite app can reach the Gin API.
 func CORS() gin.HandlerFunc {
 	origin := os.Getenv("CORS_ORIGIN")
 	if origin == "" {

@@ -1,6 +1,8 @@
+// Shared chat bubble renderer for both user and Brainy turns.
 import { Bot } from "lucide-react";
 import { UserCircle } from "lucide-react";
 
+// Minimal markdown support for bold spans used in assistant responses.
 function renderText(text) {
   const parts = text.split(/\*\*(.*?)\*\*/g);
   return parts.map((part, i) =>

@@ -1,3 +1,5 @@
+// Shared Brainy avatar component. `mood` selects one of the static PNGs from
+// /public and keeps character rendering consistent across pages.
 const BRAINY_IMAGES = {
   normal:    "/brainy_normal.png",
   happy:     "/brainy_happy.png",

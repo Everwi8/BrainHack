@@ -1,3 +1,4 @@
+// Inline shelter recommendation card used inside chat replies.
 import { House } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 
@@ -30,6 +31,8 @@ export default function InlineShelterCard({ name, distance, status, onViewMap })
         </div>
       </div>
       <button
+        // Default CTA opens the map page; callers can override with a custom
+        // handler (for example, pre-filtering or centering on a marker).
         onClick={onViewMap ?? (() => navigate("/map"))}
         style={{
           background: "none", border: "none",

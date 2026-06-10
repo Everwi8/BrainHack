@@ -61,6 +61,8 @@ export default function BrainyPanel() {
         <div style={{ fontSize: 12, fontWeight: 700, color: "#999", letterSpacing: 1, margin: "20px 0 14px" }}>QUICK TOPICS</div>
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 10 }}>
           {quickTopics.map(({ Icon, label, bg, color, prompt }) => (
+            // Passes an initial prompt via router state; Chat.jsx consumes and
+            // auto-sends it once so users can jump straight into common flows.
             <button key={label} onClick={() => navigate("/chat", { state: { prompt } })} style={{
               background: bg,
               border: "none",

@@ -1,3 +1,4 @@
+// Frontend entrypoint: boot React, global styles, and Leaflet CSS once.
 import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
 import './index.css'
