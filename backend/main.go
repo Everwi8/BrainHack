@@ -118,6 +118,7 @@ func main() {
 		api.GET("/feed", handler.GetFeed)
 		api.GET("/geocode/reverse", handler.ReverseGeocode)   // lat/lng → readable address
 		api.GET("/resources/nearby", handler.NearbyResources) // OneMap civic resources near a point
+		api.GET("/route", handler.RouteETA)                   // from→to drive + public-transport ETA (minutes)
 
 		// Jerald — map markers
 		api.GET("/map/markers", handler.MapMarkers)

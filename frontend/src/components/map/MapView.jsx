@@ -119,14 +119,25 @@ export default function MapView({ crisis = [], shelters = [], hospitals = [], us
   // Ref to the Leaflet map instance so the "Find me" overlay button (which lives
   // outside the MapContainer's React tree) can pan the map.
   const mapRef = useRef(null);
+  // Ref to the user-location CircleMarker so "Find me" can pop its tooltip.
+  const youMarkerRef = useRef(null);
 
   // Recenter on the user. Uses the resolved position when we have it, otherwise
-  // asks Leaflet to actively locate via the browser.
+  // asks Leaflet to actively locate via the browser. We also pop the "You are
+  // here" label on the violet dot so, after recentering, the user can tell their
+  // own marker apart from the crisis / shelter / hospital pins instead of mixing
+  // it up. The label auto-hides after a moment so it doesn't linger.
   const findMe = () => {
     const map = mapRef.current;
     if (!map) return;
     if (userPos) map.flyTo(userPos, 16, { duration: 1 });
     else map.locate({ setView: true, maxZoom: 16 });
+
+    const marker = youMarkerRef.current;
+    if (marker) {
+      marker.openTooltip();
+      setTimeout(() => { try { marker.closeTooltip(); } catch (_) {} }, 3500);
+    }
   };
 
   return (
@@ -240,6 +251,7 @@ export default function MapView({ crisis = [], shelters = [], hospitals = [], us
             blue hospital / green shelter markers) */}
         {userPos && (
           <CircleMarker
+            ref={youMarkerRef}
             center={userPos}
             radius={9}
             pathOptions={{ color: "#fff", weight: 3, fillColor: YOU_COLOR, fillOpacity: 1 }}

@@ -10,6 +10,7 @@ import {
   ArrowLeft, MapPin, Clock, Droplets, Waves, TrainFront, BedDouble,
   TrendingUp, TrendingDown, Minus, ShieldCheck, ExternalLink, Users, ListTodo,
   MessageCircle, MessagesSquare, ChevronRight, AlertTriangle, Sparkles, Layers, Check,
+  Car,
 } from "lucide-react";
 import Navbar from "../components/layout/NavBar";
 import BrainyMascot from "../components/BrainyMascot";
@@ -415,6 +416,41 @@ export default function CrisisDetail() {
   const [recommendedTaskId, setRecommendedTaskId] = useState(null);
   const [matchRationale, setMatchRationale] = useState("");
   const [matchError, setMatchError] = useState("");
+
+  // Travel-time ETA from the user's current location to this crisis, drive +
+  // public transport, computed server-side via OneMap routing (GET /api/route).
+  const [eta, setEta] = useState(null);          // { drive_min, pt_min } | null
+  const [etaLoading, setEtaLoading] = useState(false);
+
+  // Once the crisis (and its coordinates) is loaded, ask the browser for the
+  // user's location and fetch the ETA. Best-effort: if geolocation is denied or
+  // OneMap can't answer, we simply don't show an ETA (no error surfaced).
+  useEffect(() => {
+    if (!crisis?.lat || !crisis?.lng || !navigator.geolocation) return undefined;
+    let cancelled = false;
+    setEtaLoading(true);
+    navigator.geolocation.getCurrentPosition(
+      async (pos) => {
+        try {
+          const q = new URLSearchParams({
+            from_lat: pos.coords.latitude,
+            from_lng: pos.coords.longitude,
+            to_lat: crisis.lat,
+            to_lng: crisis.lng,
+          });
+          const data = await api.get(`/api/route?${q.toString()}`);
+          if (!cancelled) setEta(data);
+        } catch {
+          if (!cancelled) setEta(null);
+        } finally {
+          if (!cancelled) setEtaLoading(false);
+        }
+      },
+      () => { if (!cancelled) setEtaLoading(false); }, // permission denied → no ETA
+      { enableHighAccuracy: true, timeout: 8000, maximumAge: 60000 },
+    );
+    return () => { cancelled = true; };
+  }, [crisis?.lat, crisis?.lng]);
 
   // Which task (if any) the user has joined in this crisis, so the matching card
   // renders its "Joined · Open chat" state.
@@ -975,6 +1011,37 @@ export default function CrisisDetail() {
                 }}>
                   Open full map <ExternalLink size={12} />
                 </Link>
+              </div>
+
+              {/* ── Your travel time to this crisis (drive + public transport) ── */}
+              <div style={{
+                display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap",
+                padding: "12px 16px", borderTop: "1px solid #EFE8DD",
+                fontFamily: "'Nunito', sans-serif",
+              }}>
+                <span style={{ fontSize: 12, fontWeight: 800, color: "#6B7280", textTransform: "uppercase", letterSpacing: 0.5 }}>
+                  Your travel time
+                </span>
+                {etaLoading ? (
+                  <span style={{ fontSize: 13, color: "#9CA3AF", fontWeight: 700 }}>Calculating…</span>
+                ) : eta && (eta.drive_min != null || eta.pt_min != null) ? (
+                  <>
+                    {eta.drive_min != null && (
+                      <span style={{ display: "inline-flex", alignItems: "center", gap: 5, fontSize: 13, fontWeight: 800, color: "#1D4ED8", background: "#EFF6FF", borderRadius: 20, padding: "5px 12px" }}>
+                        <Car size={14} /> {eta.drive_min} min drive
+                      </span>
+                    )}
+                    {eta.pt_min != null && (
+                      <span style={{ display: "inline-flex", alignItems: "center", gap: 5, fontSize: 13, fontWeight: 800, color: "#15803D", background: "#F0FDF4", borderRadius: 20, padding: "5px 12px" }}>
+                        <TrainFront size={14} /> {eta.pt_min} min transit
+                      </span>
+                    )}
+                  </>
+                ) : (
+                  <span style={{ fontSize: 12, color: "#9CA3AF", fontWeight: 600 }}>
+                    Enable location to see your ETA
+                  </span>
+                )}
               </div>
             </Panel>
 
