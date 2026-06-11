@@ -1,15 +1,37 @@
 # BrainySG — AI Crisis Response for Singapore
 
+> 🏆 **BrainHack 2026 finalist — Open Track.** Built as a hackathon MVP and
+> polished after the event — this README is the clone-and-run guide for anyone
+> picking it up.
+
 BrainySG is a community crisis-response app for Singapore. It pulls live data
 from cross-agency government feeds (NEA, LTA, PUB), surfaces active situations on
 a map, and uses an LLM to triage each crisis into a plain-language summary plus
 concrete volunteer tasks. Residents can report incidents, coordinators approve
-and manage them, and volunteers join tasks and coordinate in per-task group
-chats. "Brainy" is the in-app assistant that answers questions over the live
-situation via text, photo, or voice.
+and manage them, and volunteers get matched to tasks by skill and coordinate in
+per-task group chats. **"Brainy"** is the in-app assistant that answers questions
+over the live situation via text, photo, or voice — in the user's chosen
+language.
 
-See [`architecture.md`](architecture.md) for a system diagram.
-See [`CODEBASE_FEATURES_AND_RULES.md`](CODEBASE_FEATURES_AND_RULES.md) for a full feature/rules/file reference.
+See [`architecture.md`](architecture.md) for a full system diagram.
+
+---
+
+## Highlights
+
+- **Live cross-agency data** — NEA (weather, haze, dengue), LTA DataMall (MRT
+  alerts), PUB (flood sensors), polled every 5 minutes and surfaced on a map.
+- **LLM triage** — each crisis is turned into a resident-facing summary and a set
+  of concrete, staffable volunteer tasks.
+- **Brainy assistant** — grounded chat over the live situation via text, photo
+  (vision), or voice (Whisper), with token streaming and a per-user reply
+  language (English / Mandarin / Malay / Tamil / Singlish).
+- **Skill-based volunteer matching** — volunteers register skills; the app ranks
+  a crisis's open tasks for them.
+- **Role-based workflow** — residents report, coordinators approve/resolve,
+  volunteers join tasks and coordinate in per-task group chats.
+- **Singapore-native maps** — OneMap tiles, reverse-geocoding, civic resources
+  ("Near you": AED / shelter / hospital), and drive + public-transport ETAs.
 
 ---
 
@@ -24,7 +46,7 @@ See [`CODEBASE_FEATURES_AND_RULES.md`](CODEBASE_FEATURES_AND_RULES.md) for a ful
 | Auth | JWT issued by the backend, role-based (resident / volunteer / coordinator) |
 | LLM | OpenAI — `gpt-4.1-mini` (multimodal) for chat + vision + situation assessments; `gpt-5.4-mini` (reasoning) for triage / task-card JSON |
 | Speech-to-text | OpenAI `whisper-1` |
-| Live data | NEA (weather, haze, dengue), LTA DataMall (MRT alerts), PUB (flood sensors) |
+| Live data | NEA (weather, haze, dengue), LTA DataMall (MRT alerts), PUB (flood sensors), OneMap (tiles + geocode + civic themes) |
 
 ---
 
@@ -35,20 +57,23 @@ You need **Node 18+**, **Go 1.21+**, and a **Supabase** project.
 ### 1. Database
 
 Run the migrations in `backend/db/migrations/` **in order** against your Supabase
-project (paste each into the SQL editor, or pipe with `psql`). They are not run
-automatically:
+project (paste each into the SQL editor, or pipe with `psql`). They are **not**
+run automatically:
 
 ```text
-001_initial.sql          tables: crises, tasks, users, volunteers, reports
-002_chat_sessions.sql    per-user chat history (JSONB)
-003_rbac_crisis_approval.sql   roles + crisis approval queue
-004_crisis_sensors.sql   sensor metadata on crises
-005_task_groups.sql      persisted AI tasks + per-task group chats
+001_initial.sql              tables: crises, tasks, users, volunteers, reports
+002_chat_sessions.sql        per-user chat history (JSONB)
+003_rbac_crisis_approval.sql roles + crisis approval queue
+004_crisis_sensors.sql       sensor metadata on crises
+005_task_groups.sql          persisted AI tasks + per-task group chats
+006_fix_crisis_timestamps.sql  created_at/updated_at defaults + backfill
+007_skills_matching.sql      volunteer skills + skill-based task matching
+008_user_language.sql        per-user preferred Brainy reply language
 ```
 
 Then load demo data from `backend/db/seeds/`:
 
-- `seed_users.sql` — the 10 demo accounts (see [`DEMO_CREDENTIALS.md`](DEMO_CREDENTIALS.md))
+- `seed_users.sql` — the 10 demo accounts (see [Demo accounts](#demo-accounts))
 - `demo_crises.sql` — curated crisis scenario (used when `DATA_SOURCE=demo`)
 
 ### 2. Backend
@@ -64,6 +89,7 @@ go run main.go         # http://localhost:8080
 
 ```bash
 cd frontend
+cp .env.example .env   # set VITE_API_URL if your backend isn't on :8080
 npm install
 npm run dev            # http://localhost:5173
 ```
@@ -86,11 +112,11 @@ Copy `backend/.env.example` to `backend/.env`:
 | `SUPABASE_PUBLISHABLE_KEY` | Public (anon) key |
 | `SUPABASE_SECRET_KEY` | Server-side service key — keep secret |
 | `JWT_SECRET` | Any long random string |
-| `LLM_API_KEY` / `LLM_BASE_URL` / `LLM_MODEL` | OpenAI chat-completions for chat + vision; defaults `gpt-4.1-mini` |
+| `LLM_API_KEY` / `LLM_BASE_URL` / `LLM_MODEL` | OpenAI chat-completions for chat + vision; defaults `gpt-4.1-mini`. `LLM_TIMEOUT_SECONDS` (default 60) raises the per-attempt timeout |
 | `LLM_JSON_MODEL` / `LLM_JSON_REASONING_EFFORT` | Model + reasoning effort for the structured-output path (triage + task cards); blank reuses `LLM_MODEL`. Defaults `gpt-5.4-mini` / `low`. GPT-5/o-series models use `max_completion_tokens` automatically |
 | `STT_API_KEY` / `STT_BASE_URL` / `STT_MODEL` | Whisper-compatible STT; defaults `whisper-1` |
 | `LTA_API_KEY` | LTA DataMall (free at datamall.lta.gov.sg); blank skips MRT ingestion |
-| `ONEMAP_EMAIL` / `ONEMAP_PASSWORD` | OneMap account (free at onemap.gov.sg) for precise reverse-geocoding in chat personalisation; blank falls back to coarse region labels |
+| `ONEMAP_EMAIL` / `ONEMAP_PASSWORD` | OneMap account (free at onemap.gov.sg) for reverse-geocoding, civic resources, and ETAs; the server auto-fetches and auto-renews the token. Blank falls back to coarse region labels |
 
 Frontend (`frontend/.env.example` → `frontend/.env`):
 
@@ -102,9 +128,15 @@ Frontend (`frontend/.env.example` → `frontend/.env`):
 
 ## Demo accounts
 
-All 10 demo accounts use the password `password`. The login screen has a
+All 10 demo accounts use the password **`password`**. The login screen has a
 one-click preset button per account (auto-registers if missing), so you usually
-don't need to type credentials. Full list in [`DEMO_CREDENTIALS.md`](DEMO_CREDENTIALS.md).
+don't need to type credentials.
+
+| Role | Accounts |
+| --- | --- |
+| Coordinator | `coordinator1@brainhack.sg`, `coordinator2@brainhack.sg` |
+| Volunteer | `volunteer1@brainhack.sg` … `volunteer3@brainhack.sg` |
+| Resident | `resident1@brainhack.sg` … `resident5@brainhack.sg` |
 
 ---
 
@@ -125,16 +157,19 @@ and some are gated to the `coordinator` role.
 
 | Area | Routes |
 | --- | --- |
-| Auth | `POST /auth/register`, `POST /auth/login` → `{ token }`; `GET/PATCH /auth/me` (own profile: edit name / password) |
+| Auth | `POST /auth/register`, `POST /auth/login` → `{ token }`; `GET/PATCH /auth/me` (own profile: name / password / reply language) |
 | Crises (read) | `GET /crises`, `GET /crises/:id`, `GET /crises/:id/triage` |
 | Crises (report) | `POST /crises`, `PATCH /crises/:id`, `GET /crises/mine` |
 | Crises (coordinator) | `GET /crises/pending`, `POST /crises/:id/{approve,reject,resolve}` |
+| Crisis chat | `POST /crises/:id/chat`, `POST /crises/:id/chat/photo` (crisis-grounded Brainy drawer) |
 | Tasks | `GET /tasks`, `GET /tasks/mine`, `POST/PATCH/DELETE /tasks/:id`, `POST/DELETE /tasks/:id/join` |
-| AI chat | `POST /chat`, `POST /chat/photo`, `GET/POST/DELETE /chat/sessions[/:id]` |
+| Matching | `GET /crises/:id/match` (rank a crisis's open tasks for the caller's skills) |
+| AI chat | `POST /chat`, `POST /chat/stream` (SSE), `POST /chat/photo`, `GET/POST/DELETE /chat/sessions[/:id]` |
 | Triage | `GET /triage`, `GET /triage/tasks` |
 | Data | `GET /data/{weather,haze,floods,transport,dengue}`, `GET /hospitals`, `GET /shelters`, `GET /feed` |
+| Geo | `GET /geocode/reverse`, `GET /resources/nearby`, `GET /route` (drive + transit ETA) |
 | Map | `GET /map/markers` |
-| Volunteers / voice | `GET/POST /volunteers`, `POST /voice` |
+| Volunteers / voice | `GET/POST /volunteers`, `GET /volunteers/skills`, `GET /volunteers/me`, `POST /voice` |
 | Group chat | `GET/POST /groupchat/:crisisID/messages`, `POST /groupchat/image` |
 | Task chat | `GET/POST /taskchat/:taskID/messages` (membership-gated) |
 | Admin | `GET/POST /admin/data-source` |
@@ -146,22 +181,25 @@ and some are gated to the `coordinator` role.
 ```text
 backend/
 ├── main.go              router wiring + ingestion goroutines + graceful shutdown
-├── handler/             HTTP handlers (auth, crises, tasks, chat, map, data, …)
+├── handler/             HTTP handlers (auth, crises, tasks, chat, map, data,
+│                          geocode, resources, route, volunteers, …)
 ├── middleware/          JWT auth guard, role guard, CORS
 ├── ingestion/           nea.go, lta.go, pub.go — 5-min pollers → Supabase
-├── lib/                 llm.go, stt.go, triage*.go, taskgen.go, datasource.go, supabase.go
+├── lib/                 llm.go, stt.go, triage*.go, taskgen.go, matching.go,
+│                          onemap.go, datasource.go, supabase.go, sanitize.go
 ├── cache/               in-memory cache with graceful degradation
 └── db/                  schema.sql, migrations/, seeds/
 
 frontend/src/
-├── pages/               Home, Map, CrisisDetail, Tasks, Chat, Volunteers, ReportCrisis, Profile, …
-├── components/          chat/, crisis/, map/, volunteer/, feed/, layout/
+├── pages/               Home, Map, CrisisDetail, Tasks, Chat, Volunteers,
+│                          ReportCrisis, Timeline, Profile, Help, Login
+├── components/          chat/, crisis/, map/, feed/, layout/
 └── lib/                 api.js, auth.js, AuthProvider.jsx, useVoiceRecorder.js
 ```
 
 ---
 
-## Notes
+## How it works (notes)
 
 - Backend default port is **8080** (Go/Gin, not Express).
 - Protected routes use `middleware.RequireAuth()`; coordinator-only routes add
@@ -175,6 +213,11 @@ frontend/src/
   produces terse findings, then `lib/triage_prose.go` expands each into a
   resident-facing paragraph, cached by finding identity and falling back to the
   template on any LLM error.
+- Brainy replies in the user's preferred language (Singlish / Mandarin / Malay /
+  Tamil), stored per-account (migration `008`).
+- Skill-based matching (`lib/matching.go`): the task generator tags each task
+  with `skills_needed`; `GET /crises/:id/match` ranks open tasks against the
+  caller's saved volunteer skills.
 - Volunteer slots are finite: joining a task decrements its `volunteers_needed`,
   leaving restores it, and at 0 the card shows "Fully staffed" and blocks new
   joins (coordinators are exempt — they oversee rather than fill a slot).
